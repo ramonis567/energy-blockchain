@@ -1,0 +1,22 @@
+# Ignorar arquivos do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+venv/
+.env
+
+# Ignorar arquivos do Node.js
+node_modules/
+dist/
+npm-debug.log
+
+# Ignorar arquivos do React
+build/
+.DS_Store
+
+# Ignorar arquivos do Docker
+*.log
+*.tmp
