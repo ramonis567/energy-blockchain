@@ -1,0 +1,16 @@
+paho-mqtt
+numpy
+fabric-sdk-py
+pandas
+matplotlib
+scipy
+cryptography
+grpcio
+grpcio-tools
+protobuf
+requests
+fastapi
+uvicorn
+flask
+python-dotenv
+loguru

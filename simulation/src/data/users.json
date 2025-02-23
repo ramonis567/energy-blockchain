@@ -1,0 +1,9 @@
+{
+    "users": [ 
+        {"id": 1, "name": "user_1", "type": "consumer"},
+        {"id": 2, "name": "user_2", "type": "consumer"},
+        {"id": 3, "name": "user_3", "type": "prosumer"},
+        {"id": 4, "name": "user_4", "type": "generator"},
+        {"id": 5, "name": "user_5", "type": "battery"}
+    ]
+}
