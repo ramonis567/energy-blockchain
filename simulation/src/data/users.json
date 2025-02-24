@@ -1,9 +1,11 @@
 {
     "users": [ 
-        {"id": 1, "name": "user_1", "type": "consumer"},
-        {"id": 2, "name": "user_2", "type": "consumer"},
-        {"id": 3, "name": "user_3", "type": "prosumer"},
-        {"id": 4, "name": "user_4", "type": "generator"},
-        {"id": 5, "name": "user_5", "type": "battery"}
+        {"id": "user_1", "type": "consumer", "class": "residential"},
+        {"id": "user_2", "type": "consumer", "class": "residential"},
+        {"id": "user_3", "type": "prosumer", "class": "residential"},
+        {"id": "user_4", "type": "producer", "class": "energy_supplier"},
+        {"id": "user_5", "type": "battery", "class": "residential"},
+        {"id": "user_6", "type": "prosumer", "class": "industrial"}
+
     ]
 }
