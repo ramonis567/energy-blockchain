@@ -6,6 +6,5 @@
         {"id": "user_4", "type": "producer", "class": "energy_supplier"},
         {"id": "user_5", "type": "battery", "class": "residential"},
         {"id": "user_6", "type": "prosumer", "class": "industrial"}
-
     ]
 }

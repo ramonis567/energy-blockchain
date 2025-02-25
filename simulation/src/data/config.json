@@ -1,5 +1,5 @@
 {
     "mqtt_broker": "localhost",
     "mqtt_port": 1883,
-    "update_interval": 5
+    "update_interval": 10
 }

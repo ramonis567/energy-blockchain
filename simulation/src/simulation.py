@@ -3,6 +3,7 @@ import time
 import random     ## REMOVE THIS AFTER IMPLEMENTING THE SIMULATION
 
 from generators.init_user_data import get_average_energy_consumption, get_average_energy_generation, get_energy_storage_capacity
+from generators.simulate_data import simulate_user_consumption, simulate_user_generation, simulate_storage
 from mqtt_client import publish_data
 from config import MQTT_UPDATE_INTERVAL
 
@@ -27,24 +28,33 @@ def simulate():
                 user["average_energy_consumption"] = get_average_energy_consumption(user["type"], user["class"])
                 user["average_energy_generation"] = get_average_energy_generation(user["type"], user["class"])
                 user["energy_storage_capacity"] = get_energy_storage_capacity(user["type"])
-
                 users_static.append(user)
 
-        # for user in users_dynamic:
-        #     user_id= user.get("id")
-        #     user_type = user.get("type")
-        #     user_class = user.get("class")
-        #     topic = f"energy/{user_type}/{user_id}"
+        for user in users_static:
+            user_id= user.get("id")
+            user_type = user.get("type")
+            user_class = user.get("class")
 
-        #     payload = {
-        #         "user_id": user_id,
-        #         "user_type": user_type,
-        #         "energy_consumption": random.randint(1, 5),
-        #         "energy_generation": random.randint(1, 5)
-        #     }
+            user_avg_consumption = user.get("average_energy_consumption")
+            user_avg_generation = user.get("average_energy_generation")
+            energy_storage_cap = user.get("energy_storage_capacity")
 
-        #     payload_json = json.dumps(payload)
-        #     publish_data(topic, payload_json)
+            topic = f"energy/{user_type}/{user_id}"
+
+            energy_consumption = simulate_user_consumption(user_type, user_class, user_avg_consumption)
+            energy_generation = simulate_user_generation(user_type, user_class, user_avg_generation)
+            energy_storage = simulate_storage(user_type, user_class, energy_storage_cap)
+
+            payload = {
+                "user_id": user_id,
+                "user_type": user_type,
+                "energy_consumption": energy_consumption,
+                "energy_generation": energy_generation,
+                "energy_storage": energy_storage
+            }
+
+            payload_json = json.dumps(payload)
+            publish_data(topic, payload_json)
 
         time.sleep(MQTT_UPDATE_INTERVAL)
 

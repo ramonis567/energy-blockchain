@@ -10,3 +10,4 @@ Start mqtt broker:
     Initialize: sudo systemctl start mosquitto
     Verify: sudo systemctl status mosquitto
 
+    Test subscribe: mosquitto_sub -h localhost -t "energy/#" -v
