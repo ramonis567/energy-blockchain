@@ -1,16 +1,17 @@
 import json
 import time
-import random     ## REMOVE THIS AFTER IMPLEMENTING THE SIMULATION
 
+from datetime import datetime, timedelta
 from generators.init_user_data import get_average_energy_consumption, get_average_energy_generation, get_energy_storage_capacity
 from generators.simulate_data import simulate_user_consumption, simulate_user_generation, simulate_storage
 from mqtt_client import publish_data
 from config import MQTT_UPDATE_INTERVAL
 
 users_static = []
+simulation_time = datetime(2025, 1, 1, 0, 0)  
 
 def simulate():
-    global users_static
+    global users_static, simulation_time
 
     while True:
         users_dynamic = json.load(open("simulation/src/data/users.json"))["users"]
@@ -48,14 +49,15 @@ def simulate():
             payload = {
                 "user_id": user_id,
                 "user_type": user_type,
-                "energy_consumption": energy_consumption,
-                "energy_generation": energy_generation,
-                "energy_storage": energy_storage
+                "energy_consumption": round(energy_consumption, 3),
+                "energy_generation": round(energy_generation, 3),
+                "energy_storage": round(energy_storage, 3)
             }
 
             payload_json = json.dumps(payload)
             publish_data(topic, payload_json)
 
+        simulation_time = simulation_time + timedelta(minutes=15) 
         time.sleep(MQTT_UPDATE_INTERVAL)
 
 if __name__ == "__main__":
