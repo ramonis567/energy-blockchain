@@ -4,10 +4,9 @@ const app = express();
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.send("API da Camada de Interligação ativa!");
+  res.send("API ativa!");
 });
 
-// Adicione endpoints conforme necessário
-// Exemplo: /dados, /status
+// Adicionar endpoints
 
 module.exports = app;
