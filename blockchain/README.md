@@ -17,6 +17,8 @@ docker ps
 To see peer logs:
 docker logs peer0.org1.example.com
 
+To stop network (test-network folder):
+./network.sh down
 
 
 TO CHANGE:
