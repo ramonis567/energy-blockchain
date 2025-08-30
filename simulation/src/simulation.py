@@ -47,6 +47,7 @@ def simulate():
             energy_storage = simulate_storage(user_type, user_class, energy_storage_cap)
 
             payload = {
+                "timestamp": simulation_time.isoformat(),
                 "user_id": user_id,
                 "user_type": user_type,
                 "energy_consumption": round(energy_consumption, 3),
@@ -61,4 +62,5 @@ def simulate():
         time.sleep(MQTT_UPDATE_INTERVAL)
 
 if __name__ == "__main__":
+    print("Simulating...")
     simulate()
