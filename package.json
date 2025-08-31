@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "interconnection": "file:interconnection"
+  }
+}

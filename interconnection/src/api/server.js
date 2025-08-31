@@ -4,7 +4,7 @@ const app = express();
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.send("API ativa!");
+  res.send("Camada de interconexão ativa!");
 });
 
 // Adicionar endpoints
