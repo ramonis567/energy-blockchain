@@ -20,3 +20,7 @@ build/
 # Ignorar arquivos do Docker
 *.log
 *.tmp
+mosquitto-data
+mosquitto-log
+influxdb-data
+grafana-data

@@ -21,12 +21,10 @@ client.on("connect", () => {
 client.on("message", (topic, message) => {
   try {
     const data = JSON.parse(message.toString());
-    console.log(`[RECEBIDO] Tópico: ${topic} | Dados:`, data);
-    
-    // processData(topic, data);
+    processData(topic, data);
 
   } catch (error) {
-    console.error(`[ERRO] Falha ao processar mensagem do tópico ${topic}:`, error);
+    console.error(`[ERRO] Falha ao processar ${topic}:`, error);
   }
 });
 

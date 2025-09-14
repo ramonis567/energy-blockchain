@@ -1,14 +1,16 @@
 import json
 import time
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from generators.init_user_data import get_average_energy_consumption, get_average_energy_generation, get_energy_storage_capacity
 from generators.simulate_data import simulate_user_consumption, simulate_user_generation, simulate_storage
 from mqtt_client import publish_data
 from config import MQTT_UPDATE_INTERVAL
 
 users_static = []
-simulation_time = datetime(2025, 1, 1, 0, 0)  
+
+today = datetime.now(timezone.utc)
+simulation_time = datetime.combine(today.date(), datetime.min.time(), tzinfo=timezone.utc)
 
 def simulate():
     global users_static, simulation_time
