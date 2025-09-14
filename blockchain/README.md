@@ -1,3 +1,7 @@
+chmod +x blockchain/start.sh blockchain/stop.sh
+
+
+
 https://hyperledger-fabric.readthedocs.io/en/release-2.5/getting_started.html
 
 Prerequisites: 

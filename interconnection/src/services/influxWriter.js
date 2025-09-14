@@ -22,7 +22,7 @@ function writeMeasurement(data) {
     console.log(data.energy_generation)
 
     writeApi.writePoint(point);
-    console.log(`[INFLUX] Gravado: ${data.user_id} em ${data.timestamp}`);
+    // console.log(`[INFLUX] Gravado: ${data.user_id} em ${data.timestamp}`);
     
   } catch (err) {
     console.error('[INFLUX] Erro ao gravar:', err);
