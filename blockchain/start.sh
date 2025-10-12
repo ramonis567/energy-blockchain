@@ -7,10 +7,7 @@ cd ~/go/src/github.com/fabric-samples/test-network
 #  Start newtowk and create a channel 'mychannel'
 ./network.sh up createChannel -c mychannel -ca
 # Deploy chaincode
-# ./network.sh deployCC \
-#   -ccn energycc \
-#   -ccp ../../energy-blockchain/chaincode/ \
-#   -ccl go
+./network.sh deployCC -ccn creditmarket -ccp /home/ramon/energy-blockchain/blockchain/chaincode/creditmarket -ccl go -ccv 1.5
 
 echo "✅ Blockchain ok!"
 echo "Channel: mychannel"

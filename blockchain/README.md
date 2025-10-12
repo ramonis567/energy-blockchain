@@ -1,7 +1,6 @@
 chmod +x blockchain/start.sh blockchain/stop.sh
 
 
-
 https://hyperledger-fabric.readthedocs.io/en/release-2.5/getting_started.html
 
 Prerequisites: 
@@ -42,11 +41,5 @@ export CORE_PEER_ADDRESS=localhost:7051
 
 Adicionar ativos: peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile "$ORDERER_CA" -C mychannel -n basic --peerAddresses localhost:7051 --tlsRootCertFiles "$PEER0_ORG1_CA" -c '{"function":"CreateAsset","Args":["asset1", "blue", "5", "Tom", "100"]}'
 
-
-Consultar ativo: peer chaincode query -C mychannel -n basic -c '{"Args":["ReadAsset","asset1"]}'
-
-Rodar meu proprio chaincode: ./network.sh deployCC -ccn energycc -ccp ./chaincode/energy-chaincode/ -ccl go
-
-Transações: peer chaincode invoke -C mychannel -n energycc -c '{"function":"RegistrarMedicao","Args":["med1", "bus01", "1.5", "geracao"]}'
 
 Criar .env para armazenar caminhos das credenciais

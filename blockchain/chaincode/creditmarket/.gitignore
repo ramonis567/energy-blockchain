@@ -1,0 +1,21 @@
+# Diretórios e arquivos Go gerados automaticamente
+vendor/
+bin/
+build/
+*.exe
+*.test
+*.out
+
+# Módulos Go
+go.sum
+
+# Arquivos temporários e cache
+*.log
+*.tmp
+
+# Arquivos do Fabric gerados na compilação
+creditmarket.tar.gz
+
+# IDEs e ambientes locais
+.vscode/
+.idea/

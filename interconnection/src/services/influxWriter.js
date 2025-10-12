@@ -19,10 +19,7 @@ function writeMeasurement(data) {
       .stringField('simulation_time', data.timestamp)
       .timestamp(new Date());
 
-    console.log(data.energy_generation)
-
     writeApi.writePoint(point);
-    // console.log(`[INFLUX] Gravado: ${data.user_id} em ${data.timestamp}`);
     
   } catch (err) {
     console.error('[INFLUX] Erro ao gravar:', err);
