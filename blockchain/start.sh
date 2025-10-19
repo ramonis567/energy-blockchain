@@ -5,9 +5,11 @@ echo "🚀 Starting Hyperledger Fabric test network..."
 # Path to test-network
 cd ~/go/src/github.com/fabric-samples/test-network
 #  Start newtowk and create a channel 'mychannel'
-./network.sh up createChannel -c mychannel -ca
+
+# ./network.sh up createChannel -c mychannel -ca             -< test
+./network.sh up createChannel
 # Deploy chaincode
-./network.sh deployCC -ccn creditmarket -ccp /home/ramon/energy-blockchain/blockchain/chaincode/creditmarket -ccl go -ccv 1.5
+./network.sh deployCC -ccn creditmarket -ccp /home/ramon/energy-blockchain/blockchain/chaincode/creditmarket -ccl go -ccv 1.1
 
 echo "✅ Blockchain ok!"
 echo "Channel: mychannel"

@@ -15,6 +15,7 @@ go.sum
 
 # Arquivos do Fabric gerados na compilação
 creditmarket.tar.gz
+creditmarket
 
 # IDEs e ambientes locais
 .vscode/

@@ -3,190 +3,205 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
+	"log"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
-type SmartContract struct{ contractapi.Contract }
+// SmartContract estrutura principal
+type SmartContract struct {
+	contractapi.Contract
+}
 
-// Prefixo apenas para ofertas (mantém separado)
-const OfferPrefix = "OFFER_"
-
-func offerKey(id string) string { return OfferPrefix + id }
-
-// ----- Estruturas -----
+// Agent representa um participante do sistema
 type Agent struct {
 	ID      string  `json:"id"`
-	Type    string  `json:"type"`
+	Type    string  `json:"type"` // "producer", "consumer", "distributor"
 	Balance float64 `json:"balance"`
+	Name    string  `json:"name"`    // Novo campo para evolução futura
+	Address string  `json:"address"` // Novo campo para evolução futura
 }
 
-type Offer struct {
-	ID       string  `json:"id"`
-	SellerID string  `json:"sellerId"`
-	Quantity float64 `json:"quantity"`
-	Price    float64 `json:"price"`
-	Status   string  `json:"status"` // OPEN / ACCEPTED / CANCELLED
+// AgentRegistrationEvent evento para notificar registro de agente
+type AgentRegistrationEvent struct {
+	AgentID string `json:"agentId"`
+	Type    string `json:"type"`
 }
 
-// ----- Agentes -----
-// Registrar novo agente
-func (s *SmartContract) RegisterAgent(ctx contractapi.TransactionContextInterface, id, agentType string) error {
+// RegisterAgent registra um novo agente no ledger
+func (s *SmartContract) RegisterAgent(ctx contractapi.TransactionContextInterface,
+	id string, agentType string, name string, address string) error {
+
+	// Validações básicas
+	if id == "" {
+		return fmt.Errorf("ID do agente não pode estar vazio")
+	}
+	if agentType == "" {
+		return fmt.Errorf("tipo do agente não pode estar vazio")
+	}
+
+	// Verifica se o agente já existe
 	exists, err := s.AgentExists(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("erro ao verificar existência do agente: %v", err)
 	}
 	if exists {
-		return fmt.Errorf("agente já existe: %s", id)
+		return fmt.Errorf("agente já registrado: %s", id)
 	}
 
+	// Cria novo agente
 	agent := Agent{
 		ID:      id,
 		Type:    agentType,
-		Balance: 0,
+		Balance: 0.0,
+		Name:    name,
+		Address: address,
 	}
 
-	bz, err := json.Marshal(agent)
+	// Serializa para JSON
+	agentJSON, err := json.Marshal(agent)
 	if err != nil {
-		return err
+		return fmt.Errorf("erro ao serializar agente: %v", err)
 	}
 
-	// Grava com o ID puro
-	return ctx.GetStub().PutState(id, bz)
+	// Salva no ledger
+	err = ctx.GetStub().PutState(id, agentJSON)
+	if err != nil {
+		return fmt.Errorf("erro ao salvar agente no ledger: %v", err)
+	}
+
+	// Emite evento para notificar o registro
+	event := AgentRegistrationEvent{
+		AgentID: id,
+		Type:    agentType,
+	}
+	eventJSON, _ := json.Marshal(event)
+	err = ctx.GetStub().SetEvent("AgentRegistered", eventJSON)
+	if err != nil {
+		// Não falha a transação se o evento não for emitido
+		log.Printf("Aviso: não foi possível emitir evento: %v", err)
+	}
+
+	return nil
 }
 
+// AgentExists verifica se um agente existe
 func (s *SmartContract) AgentExists(ctx contractapi.TransactionContextInterface, id string) (bool, error) {
-	bz, err := ctx.GetStub().GetState(id)
+	agentJSON, err := ctx.GetStub().GetState(id)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("erro ao acessar ledger: %v", err)
 	}
-	return bz != nil, nil
+	return agentJSON != nil, nil
 }
 
-// Listar todos os agentes
-func (s *SmartContract) GetAllAgents(ctx contractapi.TransactionContextInterface) ([]*Agent, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+// GetAgent retorna um agente específico
+func (s *SmartContract) GetAgent(ctx contractapi.TransactionContextInterface, id string) (*Agent, error) {
+	agentJSON, err := ctx.GetStub().GetState(id)
 	if err != nil {
-		return nil, fmt.Errorf("erro ao obter range: %v", err)
+		return nil, fmt.Errorf("erro ao acessar ledger: %v", err)
 	}
-	defer it.Close()
+	if agentJSON == nil {
+		return nil, fmt.Errorf("agente não encontrado: %s", id)
+	}
+
+	var agent Agent
+	err = json.Unmarshal(agentJSON, &agent)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao desserializar agente: %v", err)
+	}
+
+	return &agent, nil
+}
+
+// GetAllAgents retorna todos os agentes registrados
+func (s *SmartContract) GetAllAgents(ctx contractapi.TransactionContextInterface) ([]*Agent, error) {
+	// Obtém todos os estados do ledger
+	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
+	if err != nil {
+		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
+	}
+	defer resultsIterator.Close()
 
 	var agents []*Agent
-	for it.HasNext() {
-		qr, err := it.Next()
+
+	// Itera sobre todos os resultados
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
 		}
 
-		// Filtra apenas o que não for uma oferta
-		if strings.HasPrefix(qr.Key, OfferPrefix) {
+		// Tenta desserializar como Agent
+		var agent Agent
+		err = json.Unmarshal(queryResponse.Value, &agent)
+		if err != nil {
+			// Se não for um Agent válido, ignora (pode ser outro tipo de dado)
 			continue
 		}
 
-		var a Agent
-		if err := json.Unmarshal(qr.Value, &a); err != nil {
-			continue
+		// Verifica se tem ID (campo obrigatório)
+		if agent.ID != "" {
+			agents = append(agents, &agent)
 		}
-		agents = append(agents, &a)
 	}
+
 	return agents, nil
 }
 
-// Consultar saldo
-func (s *SmartContract) GetAgentBalance(ctx contractapi.TransactionContextInterface, id string) (float64, error) {
-	bz, err := ctx.GetStub().GetState(id)
-	if err != nil || bz == nil {
-		return 0, fmt.Errorf("agente não encontrado: %s", id)
+// GetAgentsByType retorna agentes filtrados por tipo (para evolução futura)
+func (s *SmartContract) GetAgentsByType(ctx contractapi.TransactionContextInterface, agentType string) ([]*Agent, error) {
+	allAgents, err := s.GetAllAgents(ctx)
+	if err != nil {
+		return nil, err
 	}
-	var a Agent
-	_ = json.Unmarshal(bz, &a)
-	return a.Balance, nil
+
+	var filteredAgents []*Agent
+	for _, agent := range allAgents {
+		if agent.Type == agentType {
+			filteredAgents = append(filteredAgents, agent)
+		}
+	}
+
+	return filteredAgents, nil
 }
 
-// Atualizar saldo (Interconnection)
-func (s *SmartContract) UpdateBalance(ctx contractapi.TransactionContextInterface, id string, delta float64) error {
-	bz, err := ctx.GetStub().GetState(id)
-	if err != nil || bz == nil {
-		return fmt.Errorf("agente não encontrado: %s", id)
-	}
-	var a Agent
-	_ = json.Unmarshal(bz, &a)
-	a.Balance += delta
-	return ctx.GetStub().PutState(id, mustJSON(a))
-}
+// UpdateAgent atualiza informações do agente (para evolução futura)
+func (s *SmartContract) UpdateAgent(ctx contractapi.TransactionContextInterface,
+	id string, name string, address string) error {
 
-// ----- Ofertas -----
-// Criar oferta (aplicação)
-func (s *SmartContract) CreateOffer(ctx contractapi.TransactionContextInterface, id, seller string, qty, price float64) error {
-	// Valida existência do vendedor
-	exists, err := s.AgentExists(ctx, seller)
+	agent, err := s.GetAgent(ctx, id)
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return fmt.Errorf("vendedor não existe: %s", seller)
+
+	// Atualiza campos permitidos
+	agent.Name = name
+	agent.Address = address
+
+	agentJSON, err := json.Marshal(agent)
+	if err != nil {
+		return fmt.Errorf("erro ao serializar agente: %v", err)
 	}
 
-	offer := Offer{ID: id, SellerID: seller, Quantity: qty, Price: price, Status: "OPEN"}
-	return ctx.GetStub().PutState(offerKey(id), mustJSON(offer))
+	return ctx.GetStub().PutState(id, agentJSON)
 }
 
-// Aceitar oferta
-func (s *SmartContract) AcceptOffer(ctx contractapi.TransactionContextInterface, offerId, buyer string) error {
-	offerBZ, err := ctx.GetStub().GetState(offerKey(offerId))
-	if err != nil || offerBZ == nil {
-		return fmt.Errorf("oferta não encontrada: %s", offerId)
+// GetAgentCount retorna o número total de agentes (para evolução futura)
+func (s *SmartContract) GetAgentCount(ctx contractapi.TransactionContextInterface) (int, error) {
+	agents, err := s.GetAllAgents(ctx)
+	if err != nil {
+		return 0, err
 	}
-	var offer Offer
-	_ = json.Unmarshal(offerBZ, &offer)
-	if offer.Status != "OPEN" {
-		return fmt.Errorf("oferta não disponível")
-	}
-
-	// Carregar agentes
-	sellerBZ, _ := ctx.GetStub().GetState(offer.SellerID)
-	buyerBZ, _ := ctx.GetStub().GetState(buyer)
-	if sellerBZ == nil {
-		return fmt.Errorf("vendedor não encontrado: %s", offer.SellerID)
-	}
-	if buyerBZ == nil {
-		return fmt.Errorf("comprador não encontrado: %s", buyer)
-	}
-
-	var seller, buyerAgent Agent
-	_ = json.Unmarshal(sellerBZ, &seller)
-	_ = json.Unmarshal(buyerBZ, &buyerAgent)
-
-	// Checar saldo do vendedor
-	if seller.Balance < offer.Quantity {
-		return fmt.Errorf("saldo insuficiente do vendedor")
-	}
-
-	// Transferir energia (créditos)
-	seller.Balance -= offer.Quantity
-	buyerAgent.Balance += offer.Quantity
-	offer.Status = "ACCEPTED"
-
-	// Persistir no ledger
-	if err := ctx.GetStub().PutState(seller.ID, mustJSON(seller)); err != nil {
-		return err
-	}
-	if err := ctx.GetStub().PutState(buyerAgent.ID, mustJSON(buyerAgent)); err != nil {
-		return err
-	}
-	return ctx.GetStub().PutState(offerKey(offer.ID), mustJSON(offer))
+	return len(agents), nil
 }
-
-// ----- util -----
-func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func main() {
-	cc, err := contractapi.NewChaincode(new(SmartContract))
+	chaincode, err := contractapi.NewChaincode(&SmartContract{})
 	if err != nil {
-		panic(err)
+		log.Panicf("Erro ao criar chaincode: %v", err)
 	}
-	if err := cc.Start(); err != nil {
-		panic(err)
+
+	if err := chaincode.Start(); err != nil {
+		log.Panicf("Erro ao iniciar chaincode: %v", err)
 	}
 }
