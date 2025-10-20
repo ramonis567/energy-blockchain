@@ -1,4 +1,4 @@
-module supplycontract
+module energytoken
 
 go 1.21.5
 

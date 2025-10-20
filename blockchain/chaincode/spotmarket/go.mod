@@ -1,4 +1,4 @@
-module supplycontract
+module spotmarket
 
 go 1.21.5
 

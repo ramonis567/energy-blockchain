@@ -1,4 +1,4 @@
-module supplycontract
+module settlementengine
 
 go 1.21.5
 

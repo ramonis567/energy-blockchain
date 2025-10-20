@@ -4,12 +4,12 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
-type SupplyContract struct {
+type EnergyTokenContract struct {
 	contractapi.Contract
 }
 
 func main() {
-	chaincode, err := contractapi.NewChaincode(&SupplyContract{})
+	chaincode, err := contractapi.NewChaincode(&EnergyTokenContract{})
 	if err != nil {
 		panic(err)
 	}
