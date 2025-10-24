@@ -14,8 +14,8 @@ go.sum
 *.tmp
 
 # Arquivos do Fabric gerados na compilação
-agentregistry.tar.gz
-agentregistry
+energytoken.tar.gz
+energytoken
 
 # IDEs e ambientes locais
 .vscode/

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
@@ -15,17 +16,22 @@ type AgentRegistryContract struct {
 
 // Agent representa um participante do sistema
 type Agent struct {
-	ID      string  `json:"id"`
-	Type    string  `json:"type"` // "producer", "consumer", "distributor"
-	Balance float64 `json:"balance"`
-	Name    string  `json:"name"`    // Novo campo para evolução futura
-	Address string  `json:"address"` // Novo campo para evolução futura
+	ID      string `json:"id"`
+	Type    string `json:"type"`    // "producer", "consumer", "distributor"
+	Name    string `json:"name"`    // Novo campo para evolução futura
+	Address string `json:"address"` // Novo campo para evolução futura
+
+	ECRBalance   float64 `json:"ecr_balance"`   // saldo energético (kWh)
+	ENGTBalance  float64 `json:"engt_balance"`  // saldo financeiro (ENGT)
+	RegisteredAt string  `json:"registered_at"` // data/hora do registro ISO8601
 }
 
 // AgentRegistrationEvent evento para notificar registro de agente
 type AgentRegistrationEvent struct {
-	AgentID string `json:"agentId"`
-	Type    string `json:"type"`
+	AgentID    string `json:"agentId"`
+	Type       string `json:"type"`
+	Timestamp  string `json:"timestamp"`
+	EmitTokens bool   `json:"emitTokens"` // será usado pelo backend para saber se deve inicializar saldo
 }
 
 // RegisterAgent registra um novo agente no ledger
@@ -46,16 +52,18 @@ func (s *AgentRegistryContract) RegisterAgent(ctx contractapi.TransactionContext
 		return fmt.Errorf("erro ao verificar existência do agente: %v", err)
 	}
 	if exists {
-		return fmt.Errorf("agente já registrado: %s", id)
+		return fmt.Errorf("agente existente, crie outro: %s", id)
 	}
 
 	// Cria novo agente
 	agent := Agent{
-		ID:      id,
-		Type:    agentType,
-		Balance: 0.0,
-		Name:    name,
-		Address: address,
+		ID:           id,
+		Type:         agentType,
+		Name:         name,
+		Address:      address,
+		ECRBalance:   0.0,
+		ENGTBalance:  0.0,
+		RegisteredAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
 	// Serializa para JSON
@@ -72,9 +80,12 @@ func (s *AgentRegistryContract) RegisterAgent(ctx contractapi.TransactionContext
 
 	// Emite evento para notificar o registro
 	event := AgentRegistrationEvent{
-		AgentID: id,
-		Type:    agentType,
+		AgentID:    id,
+		Type:       agentType,
+		Timestamp:  agent.RegisteredAt,
+		EmitTokens: true, // indica ao backend para inicializar saldo
 	}
+
 	eventJSON, _ := json.Marshal(event)
 	err = ctx.GetStub().SetEvent("AgentRegistered", eventJSON)
 	if err != nil {
@@ -123,15 +134,12 @@ func (s *AgentRegistryContract) GetAllAgents(ctx contractapi.TransactionContextI
 	defer resultsIterator.Close()
 
 	var agents []*Agent
-
-	// Itera sobre todos os resultados
 	for resultsIterator.HasNext() {
 		queryResponse, err := resultsIterator.Next()
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
 		}
 
-		// Tenta desserializar como Agent
 		var agent Agent
 		err = json.Unmarshal(queryResponse.Value, &agent)
 		if err != nil {
@@ -174,7 +182,6 @@ func (s *AgentRegistryContract) UpdateAgent(ctx contractapi.TransactionContextIn
 		return err
 	}
 
-	// Atualiza campos permitidos
 	agent.Name = name
 	agent.Address = address
 
@@ -193,6 +200,33 @@ func (s *AgentRegistryContract) GetAgentCount(ctx contractapi.TransactionContext
 		return 0, err
 	}
 	return len(agents), nil
+}
+
+func (s *AgentRegistryContract) GetAgentFullInfo(ctx contractapi.TransactionContextInterface, id string) (map[string]interface{}, error) {
+	agent, err := s.GetAgent(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Inter-chaincode call (EnergyToken)
+	response := ctx.GetStub().InvokeChaincode("energytoken", [][]byte{
+		[]byte("GetBalance"), []byte(id),
+	}, "mychannel")
+
+	if response.Status != 200 {
+		return map[string]interface{}{
+			"agent":   agent,
+			"balance": "indisponível",
+		}, nil
+	}
+
+	var balance map[string]interface{}
+	_ = json.Unmarshal(response.Payload, &balance)
+
+	return map[string]interface{}{
+		"agent":   agent,
+		"balance": balance,
+	}, nil
 }
 
 func main() {

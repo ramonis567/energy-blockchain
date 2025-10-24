@@ -1,45 +1,148 @@
-chmod +x blockchain/start.sh blockchain/stop.sh
+# Camada Blockchain — Sistema de Gerenciamento de Transações Energéticas com foco em Microgrids (MMGD)
+
+Este diretório contém toda a **camada blockchain** do sistema de gerenciamento de transações energéticas, responsável por registrar, liquidar e auditar as trocas de energia entre agentes (consumidores, produtores, prosumers e baterias) em uma camada blockchain permissionada **Hyperledger Fabric**.
+
+A camada é composta por múltiplos **smart contracts (chaincodes)** interconectados, que implementam os mecanismos de mercado **Spot**, **Créditos** e **Contratos Bilaterais**, além de contratos de base e de liquidação.
+
+---
+
+## 🧩 Estrutura da Camada Blockchain
+
+blockchain/
+├── chaincode/
+│ ├── agentregistry/ # Cadastro e gestão de agentes
+│ │ ├── agentregistry.go
+│ │ ├── go.mod
+│ │ └── README.md
+│ │
+│ ├── energytoken/ # Token energético (ECR) e financeiro (ENGT)
+│ │ ├── energytoken.go
+│ │ ├── go.mod
+│ │ └── README.md
+│ │
+│ ├── spotmarket/ # Mercado à vista de energia (transações instantâneas)
+│ │ ├── spotmarket.go
+│ │ ├── go.mod
+│ │ └── README.md
+│ │
+│ ├── creditmarket/ # Mercado de créditos energéticos (compensação temporal)
+│ │ ├── creditmarket.go
+│ │ ├── go.mod
+│ │ └── README.md
+│ │
+│ ├── supplycontract/ # Contratos bilaterais e PPAs locais
+│ │ ├── supplycontract.go
+│ │ ├── go.mod
+│ │ └── README.md
+│ │
+│ ├── settlementengine/ # Liquidação e reconciliação de saldos
+│ │ ├── settlementengine.go
+│ │ ├── go.mod
+│ │ └── README.md
+│ │
+│ ├── utils/ # Funções auxiliares reutilizáveis
+│ │ ├── ledger_utils.go
+│ │ └── token_types.go
+│ │
+│ └── shared/ # Estruturas e tipos compartilhados entre contratos
+│ ├── structs.go
+│ ├── events.go
+│ └── README.md
+│
+├── scripts/
+│ ├── deploy-chaincode.sh # Automação de deploy para qualquer contrato
+│ ├── test-agentregistry.sh
+│ ├── test-spotmarket.sh
+│ ├── test-supplycontract.sh
+│ └── test-creditmarket.sh
+│ └── start.sh # Inicia a rede de teste e faz deploy do primeiro chaincode
+│ └── stop.sh # Finaliza a rede e remove serviços auxiliares
+│ └── update-go.sh # Atualiza e configura o Go 1.21+
+│ └── README.md  # Anotações gerais sobre a simulação  (arquivo temporário)
+└── README.md # (este arquivo)
+
+## 🧠 Arquitetura dos Smart Contracts
+
+| **Smart Contract** | **Função Principal** | **Tipo** | **Depende de** |
+|--------------------|----------------------|----------|----------------|
+| `AgentRegistry`    | Cadastro e gestão de agentes | Base | — |
+| `EnergyToken`      | Emissão e transferência de tokens ECR/ENGT | Base | AgentRegistry |
+| `SpotMarket`       | Transações instantâneas de energia | Mercado | AgentRegistry, EnergyToken |
+| `CreditMarket`     | Créditos energéticos e compensação temporal | Mercado | AgentRegistry, EnergyToken |
+| `SupplyContract`   | Contratos bilaterais de longo prazo | Mercado | AgentRegistry, EnergyToken |
+| `SettlementEngine` | Liquidação e reconciliação geral | Core | Todos os anteriores |
+
+---
+
+## 💰 Tokens Utilizados
+
+- **ECR (Energy Credit Token):** Representa créditos energéticos em kWh, não conversíveis em moeda.  
+- **ENGT (Energy Trade Token):** Token financeiro fungível usado nas transações spot e contratuais.
+
+Cada agente possui saldos em ambos os tokens, registrados no ledger de forma imutável.
+
+---
+
+## 🚀 Execução e Deploy
+
+### Atualizar o Go (apenas uma vez)
+```bash
+cd blockchain
+chmod +x update-go.sh
+./update-go.sh
+```
+
+### Iniciar a rede Fabric e fazer deploy do primeiro chaincode
+```bash
+cd scripts
+chmod +x start.sh
+./start.sh
+```
+
+Isso inicia:
+Rede de teste do Fabric (mychannel)
+Chaincode inicial (por padrão, agentregistry)
+Serviços auxiliares via Docker (Mosquitto, InfluxDB, Grafana)
+
+### Deploy de novos contratos
+```bash
+./scripts/deploy-chaincode.sh <nome>
+# Exemplo:
+./scripts/deploy-chaincode.sh energytoken
+```
+
+### Testes via CLI
+```bash
 
 
-https://hyperledger-fabric.readthedocs.io/en/release-2.5/getting_started.html
 
-Prerequisites: 
-Docker latest version
-WSL2 (also download and install a linux distro like Ubuntu 22.04)
+```
 
-Install using this guide: https://hyperledger-fabric.readthedocs.io/en/release-2.5/install.html
+## Testes e Validação  (REVISAR)
 
-To run test network:
-Go to fabric-samples folder, located in ~home/go/src/github.com/fabric-samples/test-network$ open docker and run:
+Após o deploy de cada contrato:
+Use os scripts em scripts/test-*.sh para validar as funções básicas.
+Verifique se os eventos (AgentRegistered, TokenMinted, OfferCreated, etc.) aparecem nos logs do peer.
+Valide integridade dos saldos com o SettlementEngine.
 
-./network.sh up createChannel -c mychannel -ca
+## Integração com Backend 
 
-To see docker containers that are already running:
-docker ps
+A comunicação entre a camada blockchain e a aplicação é feita via Fabric SDK for Node.js, no diretório /backend.
+As rotas REST previstas são:
 
-To see peer logs:
-docker logs peer0.org1.example.com
-
-To stop network (test-network folder):
-./network.sh down
-
-
-TO CHANGE:
-
-Para rodar com chaincode: ./network.sh deployCC -ccn basic -ccp ../asset-transfer-basic/chaincode-go/ -ccl go
-
-Executar transações: export PATH=${PWD}/../bin:$PATH
-export FABRIC_CFG_PATH=$PWD/../config/
-export CORE_PEER_TLS_ENABLED=true
-
-export ORDERER_CA=${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
-export PEER0_ORG1_CA=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-export CORE_PEER_LOCALMSPID="Org1MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=$PEER0_ORG1_CA
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-export CORE_PEER_ADDRESS=localhost:7051
-
-Adicionar ativos: peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile "$ORDERER_CA" -C mychannel -n basic --peerAddresses localhost:7051 --tlsRootCertFiles "$PEER0_ORG1_CA" -c '{"function":"CreateAsset","Args":["asset1", "blue", "5", "Tom", "100"]}'
+Rota	Método	Função
+/api/agents	POST / GET / GET/:id	Registrar e consultar agentes
+/api/tokens/mint	POST	Emitir tokens ECR/ENGT
+/api/tokens/transfer	POST	Transferir tokens entre agentes
+/api/spot/offers	POST / GET	Ofertas no mercado spot
+/api/credits	POST / GET	Gerenciar créditos energéticos
+/api/contracts	POST / GET	Criar e executar contratos bilaterais
+/api/market/summary	GET	Consultar relatórios consolidados
 
 
-Criar .env para armazenar caminhos das credenciais
+Go: 1.21.5+
+Hyperledger Fabric: 2.5+
+Docker e Docker Compose
+WSL2 + Ubuntu 22.04 (recomendado para Windows)
+Fabric Samples: Instalado em ~/go/src/github.com/fabric-samples/test-network
+
