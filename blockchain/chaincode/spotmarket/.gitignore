@@ -14,8 +14,8 @@ go.sum
 *.tmp
 
 # Arquivos do Fabric gerados na compilação
-agentregistry.tar.gz
-agentregistry
+spotmarket.tar.gz
+spotmarket
 
 # IDEs e ambientes locais
 .vscode/
