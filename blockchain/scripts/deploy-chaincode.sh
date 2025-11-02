@@ -5,9 +5,9 @@ NAME=$1
 cd ~/go/src/github.com/fabric-samples/test-network
 
 ./network.sh deployCC \
-    -ccn $NAME \
-    -ccp ~/energy-blockchain/blockchain/chaincode/$NAME \
+    -ccn main_cc \
+    -ccp ~/energy-blockchain/blockchain/chaincode \
     -ccl go \
-    -ccv 1.0
+    -ccv 1.1
 
-echo "✅ Chaincode $NAME implantado a partir de $NAME"
+echo "✅ Chaincode main implantado a partir de chaincode"

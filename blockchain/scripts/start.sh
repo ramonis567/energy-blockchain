@@ -11,8 +11,7 @@ cd ~/go/src/github.com/fabric-samples/test-network
 # Deploy chaincode
 # ./network.sh deployCC -ccn creditmarket -ccp /home/ramon/energy-blockchain/blockchain/chaincode/agentregistry -ccl go -ccv 1.2
 cd ~/energy-blockchain/blockchain/scripts
-./deploy-chaincode.sh agentregistry
-./deploy-chaincode.sh energytoken
+./deploy-chaincode.sh
 
 cd ~/go/src/github.com/fabric-samples/test-network
 export PATH=${PWD}/../bin:$PATH
