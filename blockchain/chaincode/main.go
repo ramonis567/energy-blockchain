@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // ========================================================
-// Merged Chaincode: AgentRegistry + EnergyToken + SpotMarket
+// Merged Chaincode: AgentRegistry + EnergyToken + SpotMarket - FIXED VERSION
 // ========================================================
 
 package main
@@ -44,16 +44,6 @@ func offerKey(id string) string {
 func mustMarshal(v interface{}) []byte {
 	b, _ := json.Marshal(v)
 	return b
-}
-
-// IMPROVED: Better floating point comparison with higher tolerance
-func almostEqual(a, b float64) bool {
-	const eps = 1e-6 // Increased tolerance for floating point arithmetic
-	diff := a - b
-	if diff < 0 {
-		diff = -diff
-	}
-	return diff < eps
 }
 
 // -------------------------
@@ -286,22 +276,29 @@ func (s *CombinedEnergyContract) GetAgentFullInfo(ctx contractapi.TransactionCon
 }
 
 // ========================================================
-// Energy Token Methods
+// Energy Token Methods - FIXED VERSION
 // ========================================================
 
+// FIXED: Mint with proper error handling
 func (c *CombinedEnergyContract) Mint(ctx contractapi.TransactionContextInterface, agentID string, tokenType string, amount float64) error {
 	if amount <= 0 {
 		return fmt.Errorf("quantidade inválida: %.2f", amount)
 	}
-	key := balanceKey(agentID)
 
+	key := balanceKey(agentID)
 	balance := TokenBalance{AgentID: agentID}
+
+	// CRITICAL FIX: Proper error handling for GetState
 	existing, err := ctx.GetStub().GetState(key)
 	if err != nil {
 		return fmt.Errorf("erro ao acessar ledger: %v", err)
 	}
+
+	// CRITICAL FIX: Proper unmarshaling with error handling
 	if existing != nil {
-		_ = json.Unmarshal(existing, &balance)
+		if err := json.Unmarshal(existing, &balance); err != nil {
+			return fmt.Errorf("erro ao desserializar saldo: %v", err)
+		}
 	}
 
 	switch tokenType {
@@ -313,7 +310,12 @@ func (c *CombinedEnergyContract) Mint(ctx contractapi.TransactionContextInterfac
 		return fmt.Errorf("tokenType inválido: %s", tokenType)
 	}
 
-	data, _ := json.Marshal(balance)
+	// CRITICAL FIX: Proper marshaling with error handling
+	data, err := json.Marshal(balance)
+	if err != nil {
+		return fmt.Errorf("erro ao serializar saldo: %v", err)
+	}
+
 	if err := ctx.GetStub().PutState(key, data); err != nil {
 		return fmt.Errorf("erro ao salvar saldo: %v", err)
 	}
@@ -323,14 +325,19 @@ func (c *CombinedEnergyContract) Mint(ctx contractapi.TransactionContextInterfac
 		"token":   tokenType,
 		"amount":  amount,
 	}
-	eventBytes, _ := json.Marshal(event)
-	if err := ctx.GetStub().SetEvent("EnergyToken:TokenMinted", eventBytes); err != nil {
-		log.Printf("Aviso: falha ao emitir evento TokenMinted: %v", err)
+	eventBytes, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("Aviso: erro ao serializar evento: %v", err)
+	} else {
+		if err := ctx.GetStub().SetEvent("EnergyToken:TokenMinted", eventBytes); err != nil {
+			log.Printf("Aviso: falha ao emitir evento TokenMinted: %v", err)
+		}
 	}
 
 	return nil
 }
 
+// FIXED: Transfer with comprehensive error handling
 func (c *CombinedEnergyContract) Transfer(ctx contractapi.TransactionContextInterface, from string, to string, tokenType string, amount float64) error {
 	if amount <= 0 {
 		return fmt.Errorf("quantidade inválida")
@@ -344,20 +351,33 @@ func (c *CombinedEnergyContract) Transfer(ctx contractapi.TransactionContextInte
 
 	var fromBal, toBal TokenBalance
 
-	fromData, _ := ctx.GetStub().GetState(fromKey)
-	toData, _ := ctx.GetStub().GetState(toKey)
+	// Read current balances with proper error handling
+	fromData, err := ctx.GetStub().GetState(fromKey)
+	if err != nil {
+		return fmt.Errorf("erro ao ler saldo do remetente: %v", err)
+	}
+	toData, err := ctx.GetStub().GetState(toKey)
+	if err != nil {
+		return fmt.Errorf("erro ao ler saldo do destinatário: %v", err)
+	}
 
 	if fromData != nil {
-		_ = json.Unmarshal(fromData, &fromBal)
+		if err := json.Unmarshal(fromData, &fromBal); err != nil {
+			return fmt.Errorf("erro ao desserializar saldo do remetente: %v", err)
+		}
 	} else {
 		fromBal = TokenBalance{AgentID: from, ECR: 0, ENGT: 0}
 	}
+
 	if toData != nil {
-		_ = json.Unmarshal(toData, &toBal)
+		if err := json.Unmarshal(toData, &toBal); err != nil {
+			return fmt.Errorf("erro ao desserializar saldo do destinatário: %v", err)
+		}
 	} else {
 		toBal = TokenBalance{AgentID: to, ECR: 0, ENGT: 0}
 	}
 
+	// Perform transfer
 	switch tokenType {
 	case "ECR":
 		if fromBal.ECR < amount {
@@ -375,9 +395,24 @@ func (c *CombinedEnergyContract) Transfer(ctx contractapi.TransactionContextInte
 		return fmt.Errorf("tokenType inválido: %s", tokenType)
 	}
 
-	ctx.GetStub().PutState(fromKey, mustMarshal(fromBal))
-	ctx.GetStub().PutState(toKey, mustMarshal(toBal))
+	// Save updated balances with proper error handling
+	fromDataUpdated, err := json.Marshal(fromBal)
+	if err != nil {
+		return fmt.Errorf("erro ao serializar saldo do remetente: %v", err)
+	}
+	toDataUpdated, err := json.Marshal(toBal)
+	if err != nil {
+		return fmt.Errorf("erro ao serializar saldo do destinatário: %v", err)
+	}
 
+	if err := ctx.GetStub().PutState(fromKey, fromDataUpdated); err != nil {
+		return fmt.Errorf("erro ao salvar saldo do remetente: %v", err)
+	}
+	if err := ctx.GetStub().PutState(toKey, toDataUpdated); err != nil {
+		return fmt.Errorf("erro ao salvar saldo do destinatário: %v", err)
+	}
+
+	// Event with error handling
 	event := map[string]interface{}{
 		"from":    from,
 		"to":      to,
@@ -386,9 +421,13 @@ func (c *CombinedEnergyContract) Transfer(ctx contractapi.TransactionContextInte
 		"fromBal": fromBal,
 		"toBal":   toBal,
 	}
-	eventBytes, _ := json.Marshal(event)
-	if err := ctx.GetStub().SetEvent("EnergyToken:TokenTransferred", eventBytes); err != nil {
-		log.Printf("Aviso: falha ao emitir evento TokenTransferred: %v", err)
+	eventBytes, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("Aviso: erro ao serializar evento de transferência: %v", err)
+	} else {
+		if err := ctx.GetStub().SetEvent("EnergyToken:TokenTransferred", eventBytes); err != nil {
+			log.Printf("Aviso: falha ao emitir evento TokenTransferred: %v", err)
+		}
 	}
 
 	return nil
@@ -417,9 +456,10 @@ func (c *CombinedEnergyContract) GetBalance(ctx contractapi.TransactionContextIn
 }
 
 // ========================================================
-// Spot Market Methods - FIXED VERSION
+// Spot Market Methods
 // ========================================================
 
+// FIXED: CreateOffer with proper error handling and verification
 func (s *CombinedEnergyContract) CreateOffer(
 	ctx contractapi.TransactionContextInterface,
 	id string, sellerID string, energyAmount float64, pricePerKWh float64,
@@ -431,9 +471,10 @@ func (s *CombinedEnergyContract) CreateOffer(
 	if energyAmount <= 0 || pricePerKWh <= 0 {
 		return fmt.Errorf("valores inválidos: energia e preço devem ser positivos")
 	}
+
 	exists, err := s.OfferExists(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("erro ao verificar existência da oferta: %v", err)
 	}
 	if exists {
 		return fmt.Errorf("oferta já existe: %s", id)
@@ -451,10 +492,18 @@ func (s *CombinedEnergyContract) CreateOffer(
 		AcceptedAt:   "",
 		SettledAt:    "",
 	}
-	data, _ := json.Marshal(offer)
-	if err := ctx.GetStub().PutState(offerKey(id), data); err != nil {
-		return fmt.Errorf("erro ao salvar oferta: %v", err)
+
+	data, err := json.Marshal(offer)
+	if err != nil {
+		return fmt.Errorf("erro ao serializar oferta: %v", err)
 	}
+
+	// CRITICAL FIX: Proper error handling for PutState
+	if err := ctx.GetStub().PutState(offerKey(id), data); err != nil {
+		return fmt.Errorf("erro ao salvar oferta no ledger: %v", err)
+	}
+
+	log.Printf("DEBUG: Offer %s successfully created and saved", id)
 
 	evt := map[string]interface{}{
 		"id":            offer.ID,
@@ -464,28 +513,44 @@ func (s *CombinedEnergyContract) CreateOffer(
 		"total_price":   offer.TotalPrice,
 		"created_at":    offer.CreatedAt,
 	}
-	if b, _ := json.Marshal(evt); ctx.GetStub().SetEvent("SpotMarket:OfferCreated", b) != nil {
-		log.Printf("Aviso: falha ao emitir OfferCreated")
+
+	eventBytes, err := json.Marshal(evt)
+	if err != nil {
+		log.Printf("Aviso: erro ao serializar evento: %v", err)
+		return nil // Don't fail the transaction due to event error
 	}
+
+	if err := ctx.GetStub().SetEvent("SpotMarket:OfferCreated", eventBytes); err != nil {
+		log.Printf("Aviso: falha ao emitir evento OfferCreated: %v", err)
+		// Don't fail the transaction due to event error
+	}
+
 	return nil
 }
 
-// FIXED: Completely rewritten AcceptOffer function
+// FIXED v2: AcceptOffer com liquidação atômica (ECR + ENGT em uma única operação)
 func (s *CombinedEnergyContract) AcceptOffer(
 	ctx contractapi.TransactionContextInterface,
 	id string, buyerID string,
 ) error {
-	// Load offer
+	log.Printf("=== ACCEPT OFFER START ===")
+	log.Printf("DEBUG: Aceitando oferta %s para comprador %s", id, buyerID)
+
+	// 1️⃣ Buscar oferta
 	raw, err := ctx.GetStub().GetState(offerKey(id))
-	if err != nil || raw == nil {
+	if err != nil {
+		return fmt.Errorf("erro ao carregar oferta: %v", err)
+	}
+	if raw == nil {
 		return fmt.Errorf("oferta não encontrada: %s", id)
 	}
+
 	var offer Offer
 	if err := json.Unmarshal(raw, &offer); err != nil {
 		return fmt.Errorf("erro ao desserializar oferta: %v", err)
 	}
 
-	// Validate offer status
+	// 2️⃣ Validar oferta
 	if offer.Status != "OPEN" {
 		return fmt.Errorf("a oferta %s já foi aceita ou liquidada", id)
 	}
@@ -493,7 +558,7 @@ func (s *CombinedEnergyContract) AcceptOffer(
 		return fmt.Errorf("um agente não pode comprar a própria oferta")
 	}
 
-	// Check balances BEFORE transfers
+	// 3️⃣ Ler saldos do vendedor e do comprador
 	sellerBalance, err := s.GetBalance(ctx, offer.SellerID)
 	if err != nil {
 		return fmt.Errorf("falha ao ler saldo do vendedor: %v", err)
@@ -503,63 +568,39 @@ func (s *CombinedEnergyContract) AcceptOffer(
 		return fmt.Errorf("falha ao ler saldo do comprador: %v", err)
 	}
 
-	// Verify sufficient balances
-	if buyerBalance.ENGT < offer.TotalPrice {
-		return fmt.Errorf("saldo insuficiente de ENGT (%.2f < %.2f)", buyerBalance.ENGT, offer.TotalPrice)
-	}
+	// 4️⃣ Verificar saldos suficientes
 	if sellerBalance.ECR < offer.EnergyAmount {
-		return fmt.Errorf("saldo insuficiente de ECR (%.2f < %.2f)", sellerBalance.ECR, offer.EnergyAmount)
+		return fmt.Errorf("saldo insuficiente de ECR do vendedor (%.2f < %.2f)", sellerBalance.ECR, offer.EnergyAmount)
+	}
+	if buyerBalance.ENGT < offer.TotalPrice {
+		return fmt.Errorf("saldo insuficiente de ENGT do comprador (%.2f < %.2f)", buyerBalance.ENGT, offer.TotalPrice)
 	}
 
-	// Calculate expected final balances
-	expectedBuyerECR := buyerBalance.ECR + offer.EnergyAmount
-	expectedBuyerENGT := buyerBalance.ENGT - offer.TotalPrice
-	expectedSellerECR := sellerBalance.ECR - offer.EnergyAmount
-	expectedSellerENGT := sellerBalance.ENGT + offer.TotalPrice
+	// 5️⃣ Executar a liquidação atômica
+	log.Printf("DEBUG: Executando liquidação - %s vende %.2f ECR por %.2f ENGT para %s",
+		offer.SellerID, offer.EnergyAmount, offer.TotalPrice, buyerID)
 
-	// Execute ENGT transfer (buyer pays seller)
-	err = s.Transfer(ctx, buyerID, offer.SellerID, "ENGT", offer.TotalPrice)
-	if err != nil {
-		return fmt.Errorf("falha ao transferir ENGT: %v", err)
+	// Vendedor entrega energia e recebe pagamento
+	sellerBalance.ECR -= offer.EnergyAmount
+	sellerBalance.ENGT += offer.TotalPrice
+
+	// Comprador recebe energia e paga
+	buyerBalance.ECR += offer.EnergyAmount
+	buyerBalance.ENGT -= offer.TotalPrice
+
+	// 6️⃣ Atualizar ledger em uma única operação por agente
+	if err := ctx.GetStub().PutState(balanceKey(offer.SellerID), mustMarshal(sellerBalance)); err != nil {
+		return fmt.Errorf("erro ao salvar saldo do vendedor: %v", err)
+	}
+	if err := ctx.GetStub().PutState(balanceKey(buyerID), mustMarshal(buyerBalance)); err != nil {
+		// Tentativa de rollback do vendedor
+		sellerBalance.ECR += offer.EnergyAmount
+		sellerBalance.ENGT -= offer.TotalPrice
+		_ = ctx.GetStub().PutState(balanceKey(offer.SellerID), mustMarshal(sellerBalance))
+		return fmt.Errorf("falha ao salvar saldo do comprador: %v", err)
 	}
 
-	// Execute ECR transfer (seller delivers energy to buyer)
-	err = s.Transfer(ctx, offer.SellerID, buyerID, "ECR", offer.EnergyAmount)
-	if err != nil {
-		// If ECR transfer fails, we should revert the ENGT transfer
-		// For simplicity, we rely on the atomic nature of blockchain transactions
-		// In production, you might want more sophisticated compensation logic
-		return fmt.Errorf("falha ao transferir ECR: %v", err)
-	}
-
-	// Verify final balances (with detailed logging for debugging)
-	finalBuyerBalance, err := s.GetBalance(ctx, buyerID)
-	if err != nil {
-		return fmt.Errorf("falha ao verificar saldo final do comprador: %v", err)
-	}
-	finalSellerBalance, err := s.GetBalance(ctx, offer.SellerID)
-	if err != nil {
-		return fmt.Errorf("falha ao verificar saldo final do vendedor: %v", err)
-	}
-
-	// Debug logging
-	log.Printf("Balance verification:")
-	log.Printf("Buyer - Expected: ECR=%.6f, ENGT=%.6f", expectedBuyerECR, expectedBuyerENGT)
-	log.Printf("Buyer - Actual:   ECR=%.6f, ENGT=%.6f", finalBuyerBalance.ECR, finalBuyerBalance.ENGT)
-	log.Printf("Seller - Expected: ECR=%.6f, ENGT=%.6f", expectedSellerECR, expectedSellerENGT)
-	log.Printf("Seller - Actual:   ECR=%.6f, ENGT=%.6f", finalSellerBalance.ECR, finalSellerBalance.ENGT)
-
-	// Verify with tolerance for floating point arithmetic
-	if !almostEqual(finalBuyerBalance.ECR, expectedBuyerECR) ||
-		!almostEqual(finalBuyerBalance.ENGT, expectedBuyerENGT) ||
-		!almostEqual(finalSellerBalance.ECR, expectedSellerECR) ||
-		!almostEqual(finalSellerBalance.ENGT, expectedSellerENGT) {
-
-		log.Printf("Balance mismatch detected!")
-		return fmt.Errorf("inconsistência na liquidação: deltas inesperados de saldo")
-	}
-
-	// Update offer status to SETTLED
+	// 7️⃣ Atualizar e registrar a oferta
 	now := time.Now().UTC().Format(time.RFC3339)
 	offer.BuyerID = buyerID
 	offer.Status = "SETTLED"
@@ -570,30 +611,31 @@ func (s *CombinedEnergyContract) AcceptOffer(
 	if err != nil {
 		return fmt.Errorf("erro ao serializar oferta atualizada: %v", err)
 	}
-
 	if err := ctx.GetStub().PutState(offerKey(id), offerJSON); err != nil {
 		return fmt.Errorf("erro ao atualizar oferta liquidada: %v", err)
 	}
 
-	// Emit settlement event
-	evt := map[string]interface{}{
-		"id":          offer.ID,
+	// 8️⃣ Emitir evento de liquidação
+	event := map[string]interface{}{
+		"offer_id":    offer.ID,
 		"seller_id":   offer.SellerID,
 		"buyer_id":    offer.BuyerID,
 		"energy_kwh":  offer.EnergyAmount,
 		"price_total": offer.TotalPrice,
-		"accepted_at": offer.AcceptedAt,
-		"buyer_ecr":   finalBuyerBalance.ECR,
-		"buyer_engt":  finalBuyerBalance.ENGT,
-		"seller_ecr":  finalSellerBalance.ECR,
-		"seller_engt": finalSellerBalance.ENGT,
+		"settled_at":  offer.SettledAt,
+		"seller_ecr":  sellerBalance.ECR,
+		"buyer_ecr":   buyerBalance.ECR,
+		"seller_engt": sellerBalance.ENGT,
+		"buyer_engt":  buyerBalance.ENGT,
+		"status":      "SETTLED",
 	}
-	if b, err := json.Marshal(evt); err == nil {
-		if err := ctx.GetStub().SetEvent("SpotMarket:OfferSettled", b); err != nil {
-			log.Printf("Aviso: falha ao emitir OfferSettled: %v", err)
-		}
+	eventBytes, _ := json.Marshal(event)
+	if err := ctx.GetStub().SetEvent("SpotMarket:OfferSettled", eventBytes); err != nil {
+		log.Printf("Aviso: falha ao emitir evento OfferSettled: %v", err)
 	}
 
+	log.Printf("DEBUG: Liquidação concluída com sucesso para oferta %s", id)
+	log.Printf("=== ACCEPT OFFER END ===")
 	return nil
 }
 

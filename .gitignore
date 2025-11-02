@@ -6,6 +6,7 @@ __pycache__/
 *.db
 *.sqlite3
 venv/
+.venv
 .env
 
 # Ignorar arquivos do Node.js

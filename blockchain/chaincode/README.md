@@ -4,8 +4,16 @@ go mod tidy
 go mod vendor
 go build
 
-
 cd ~/go/src/github.com/fabric-samples/test-network
+
+export PATH=${PWD}/../bin:$PATH
+export FABRIC_CFG_PATH=$PWD/../config/
+export CORE_PEER_TLS_ENABLED=true
+export CORE_PEER_LOCALMSPID="Org1MSP"
+export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+export CORE_PEER_ADDRESS=localhost:7051
+export ORDERER_CA=${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
 
 peer lifecycle chaincode queryinstalled
 peer lifecycle chaincode querycommitted -C mychannel
@@ -66,9 +74,7 @@ peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.exa
 
 # Checking balances
 peer chaincode query -C mychannel -n main_cc -c '{"function":"GetBalance","Args":["producer1"]}'
-
 peer chaincode query -C mychannel -n main_cc -c '{"function":"GetBalance","Args":["consumer1"]}'
-
 peer chaincode query -C mychannel -n main_cc -c '{"function":"GetBalance","Args":["prosumer1"]}'
 
 # Criando oferta de energia do produtor (50 kWh a 4 ENGT/kWh)
@@ -97,6 +103,7 @@ peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.exa
 --peerAddresses localhost:7051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt \
 --peerAddresses localhost:9051 --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt \
 -c '{"function":"AcceptOffer","Args":["offer1","consumer1"]}'
+
 
 # ACEITAR OFERTA DO PROSUMER PELO CONSUMIDOR
 peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com \
@@ -176,62 +183,3 @@ peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.exa
 peer chaincode query -C mychannel -n main_cc -c '{"function":"GetBalance","Args":["producer1"]}'
 peer chaincode query -C mychannel -n main_cc -c '{"function":"GetBalance","Args":["consumer1"]}'
 peer chaincode query -C mychannel -n main_cc -c '{"function":"GetBalance","Args":["prosumer1"]}'
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Verificar caminho dos chaincodes
-
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
-echo 'export GOPATH=$HOME/go' >> ~/.bashrc
-echo 'export PATH=$PATH:$GOPATH/bin' >> ~/.bashrc
-source ~/.bashrc
-
-Iniciar dependências e gerar .sum
-go mod init creditmarket
-go mod tidy
-
-Teste que funcionaram:
-# Registrar um agente
-peer chaincode invoke \
-  -o localhost:7050 \
-  --ordererTLSHostnameOverride orderer.example.com \
-  --tls \
-  --cafile ${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem \
-  -C mychannel \
-  -n creditmarket \
-  --peerAddresses localhost:7051 \
-  --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt \
-  --peerAddresses localhost:9051 \
-  --tlsRootCertFiles ${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt \
-  -c '{"function":"RegisterAgent","Args":["agent1", "producer", "Solar Farm", "Solar Street 123"]}'
-
-  # Consultar todos os agentes
-peer chaincode query \
-  -C mychannel \
-  -n creditmarket \
-  -c '{"function":"GetAllAgents","Args":[]}'
-
-# Consultar agente específico
-peer chaincode query \
-  -C mychannel \
-  -n creditmarket \
-  -c '{"function":"GetAgent","Args":["agent1"]}'
-
-# Listar funções disponíveis (se suportado)
-peer chaincode query \
-  -C mychannel \
-  -n creditmarket \
-  -c '{"function":"org.hyperledger.fabric:GetMetadata","Args":[]}'
