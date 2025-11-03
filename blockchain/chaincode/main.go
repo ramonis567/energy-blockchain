@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // ========================================================
-// Merged Chaincode: AgentRegistry + EnergyToken + SpotMarket - FIXED VERSION
+// Merged Chaincode: AgentRegistry + EnergyToken + SpotMarket + ContractMarket - FIXED VERSION
 // ========================================================
 
 package main
@@ -20,9 +20,11 @@ import (
 // -------------------------
 
 const (
-	AgentKeyPrefix   = "agentreg:agent:"
-	BalanceKeyPrefix = "energytoken:balance:"
-	OfferKeyPrefix   = "spotmarket:offer:"
+	AgentKeyPrefix    = "agentreg:agent:"
+	BalanceKeyPrefix  = "energytoken:balance:"
+	OfferKeyPrefix    = "spotmarket:offer:"
+	ContractKeyPrefix = "supply:contract:"
+	EscrowKeyPrefix   = "supply:escrow:"
 )
 
 // -------------------------
@@ -39,6 +41,14 @@ func balanceKey(id string) string {
 
 func offerKey(id string) string {
 	return OfferKeyPrefix + id
+}
+
+func contractKey(id string) string {
+	return ContractKeyPrefix + id
+}
+
+func escrowKey(contractID, party, token string) string {
+	return EscrowKeyPrefix + contractID + ":" + party + ":" + token
 }
 
 func mustMarshal(v interface{}) []byte {
@@ -93,6 +103,33 @@ type Offer struct {
 	CreatedAt    string  `json:"created_at"`
 	AcceptedAt   string  `json:"accepted_at"`
 	SettledAt    string  `json:"settled_at"`
+}
+
+type SupplyContract struct {
+	ID               string  `json:"id"`
+	SellerID         string  `json:"seller_id"`
+	BuyerID          string  `json:"buyer_id"`
+	EnergyTotal      float64 `json:"energy_total"`      // kWh contratados
+	DeliveredTotal   float64 `json:"delivered_total"`   // kWh já entregues (relatados)
+	UnsettledEnergy  float64 `json:"unsettled_energy"`  // kWh entregues e ainda não liquidados
+	PricePerKWh      float64 `json:"price_per_kwh"`     // ENGT/kWh
+	TotalValue       float64 `json:"total_value"`       // EnergyTotal * PricePerKWh
+	SellerCollateral float64 `json:"seller_collateral"` // ECR bloqueado
+	BuyerCollateral  float64 `json:"buyer_collateral"`  // ENGT bloqueado
+	StartDate        string  `json:"start_date"`
+	EndDate          string  `json:"end_date"`
+	SettlementFreq   string  `json:"settlement_freq"` // DAILY, WEEKLY, MONTHLY
+	Status           string  `json:"status"`          // "ACTIVE", "CLOSED", "CANCELLED"
+	CreatedAt        string  `json:"created_at"`
+	LastSettleAt     string  `json:"last_settled_at"`
+}
+
+type Escrow struct {
+	ContractID string  `json:"contract_id"`
+	OwnerID    string  `json:"owner_id"` // "seller" ou "buyer"
+	Token      string  `json:"token"`
+	Amount     float64 `json:"amount"`
+	CreatedAt  string  `json:"created_at"`
 }
 
 // -------------------------
@@ -669,6 +706,450 @@ func (s *CombinedEnergyContract) OfferExists(ctx contractapi.TransactionContextI
 		return false, fmt.Errorf("erro ao verificar oferta: %v", err)
 	}
 	return data != nil, nil
+}
+
+// ========================================================
+// Contract Market Methods
+// ========================================================
+
+// CreateSupplyContract cria contrato e trava colaterais (opcionais) em escrow.
+// sellerCollateralECR: ECR a travar do vendedor
+// buyerCollateralENGT: ENGT a travar do comprador
+func (s *CombinedEnergyContract) CreateSupplyContract(
+	ctx contractapi.TransactionContextInterface,
+	id, sellerID, buyerID string,
+	energyTotal, pricePerKWh float64,
+	startDate, endDate, settlementFreq string,
+	sellerCollateralECR, buyerCollateralENGT float64,
+) error {
+	// validações básicas
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(sellerID) == "" || strings.TrimSpace(buyerID) == "" {
+		return fmt.Errorf("id, sellerID e buyerID são obrigatórios")
+	}
+	if energyTotal <= 0 || pricePerKWh <= 0 {
+		return fmt.Errorf("energyTotal e pricePerKWh devem ser positivos")
+	}
+
+	// existir
+	exists, err := s.ContractExists(ctx, id)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("contrato já existe: %s", id)
+	}
+	if ok, _ := s.AgentExists(ctx, sellerID); !ok {
+		return fmt.Errorf("sellerID não encontrado: %s", sellerID)
+	}
+	if ok, _ := s.AgentExists(ctx, buyerID); !ok {
+		return fmt.Errorf("buyerID não encontrado: %s", buyerID)
+	}
+
+	// ler saldos para validar colateral
+	sellerBal, err := s.GetBalance(ctx, sellerID)
+	if err != nil {
+		return fmt.Errorf("erro ao ler saldo do vendedor: %v", err)
+	}
+	buyerBal, err := s.GetBalance(ctx, buyerID)
+	if err != nil {
+		return fmt.Errorf("erro ao ler saldo do comprador: %v", err)
+	}
+
+	if sellerCollateralECR < 0 || buyerCollateralENGT < 0 {
+		return fmt.Errorf("colaterais não podem ser negativos")
+	}
+	if sellerBal.ECR < sellerCollateralECR {
+		return fmt.Errorf("vendedor sem ECR suficiente para colateral (%.2f < %.2f)", sellerBal.ECR, sellerCollateralECR)
+	}
+	if buyerBal.ENGT < buyerCollateralENGT {
+		return fmt.Errorf("comprador sem ENGT suficiente para colateral (%.2f < %.2f)", buyerBal.ENGT, buyerCollateralENGT)
+	}
+
+	// debitar colaterais (se > 0) e gravar escrows
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if sellerCollateralECR > 0 {
+		sellerBal.ECR -= sellerCollateralECR
+		if err := ctx.GetStub().PutState(balanceKey(sellerID), mustMarshal(sellerBal)); err != nil {
+			return fmt.Errorf("erro ao salvar saldo vendedor: %v", err)
+		}
+		sellerEscrow := Escrow{
+			ContractID: id, OwnerID: sellerID, Token: "ECR", Amount: sellerCollateralECR, CreatedAt: now,
+		}
+		if err := ctx.GetStub().PutState(escrowKey(id, "seller", "ECR"), mustMarshal(sellerEscrow)); err != nil {
+			return fmt.Errorf("erro ao gravar escrow vendedor: %v", err)
+		}
+	}
+
+	if buyerCollateralENGT > 0 {
+		buyerBal.ENGT -= buyerCollateralENGT
+		if err := ctx.GetStub().PutState(balanceKey(buyerID), mustMarshal(buyerBal)); err != nil {
+			return fmt.Errorf("erro ao salvar saldo comprador: %v", err)
+		}
+		buyerEscrow := Escrow{
+			ContractID: id, OwnerID: buyerID, Token: "ENGT", Amount: buyerCollateralENGT, CreatedAt: now,
+		}
+		if err := ctx.GetStub().PutState(escrowKey(id, "buyer", "ENGT"), mustMarshal(buyerEscrow)); err != nil {
+			return fmt.Errorf("erro ao gravar escrow comprador: %v", err)
+		}
+	}
+
+	// construir e salvar contrato
+	contract := SupplyContract{
+		ID:               id,
+		SellerID:         sellerID,
+		BuyerID:          buyerID,
+		EnergyTotal:      energyTotal,
+		DeliveredTotal:   0,
+		UnsettledEnergy:  0,
+		PricePerKWh:      pricePerKWh,
+		TotalValue:       energyTotal * pricePerKWh,
+		SellerCollateral: sellerCollateralECR,
+		BuyerCollateral:  buyerCollateralENGT,
+		StartDate:        startDate,
+		EndDate:          endDate,
+		SettlementFreq:   settlementFreq,
+		Status:           "ACTIVE",
+		CreatedAt:        now,
+		LastSettleAt:     "",
+	}
+	if err := ctx.GetStub().PutState(contractKey(id), mustMarshal(contract)); err != nil {
+		return fmt.Errorf("erro ao salvar contrato: %v", err)
+	}
+
+	// evento
+	ev := map[string]interface{}{
+		"id": id, "seller": sellerID, "buyer": buyerID,
+		"energy_total": energyTotal, "price": pricePerKWh,
+		"seller_collateral_ecr": sellerCollateralECR,
+		"buyer_collateral_engt": buyerCollateralENGT,
+		"created_at":            now,
+	}
+	_ = ctx.GetStub().SetEvent("Supply:ContractCreated", mustMarshal(ev))
+	return nil
+}
+
+func (s *CombinedEnergyContract) ContractExists(ctx contractapi.TransactionContextInterface, id string) (bool, error) {
+	data, err := ctx.GetStub().GetState(contractKey(id))
+	if err != nil {
+		return false, fmt.Errorf("erro ao verificar contrato: %v", err)
+	}
+	return data != nil, nil
+}
+
+func (s *CombinedEnergyContract) GetContract(ctx contractapi.TransactionContextInterface, id string) (*SupplyContract, error) {
+	data, err := ctx.GetStub().GetState(contractKey(id))
+	if err != nil {
+		return nil, fmt.Errorf("erro ao carregar contrato: %v", err)
+	}
+	if data == nil {
+		return nil, fmt.Errorf("contrato não encontrado: %s", id)
+	}
+	var c SupplyContract
+	if err := json.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("erro ao desserializar contrato: %v", err)
+	}
+	return &c, nil
+}
+
+func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionContextInterface) ([]*SupplyContract, error) {
+	it, err := ctx.GetStub().GetStateByRange("", "")
+	if err != nil {
+		return nil, fmt.Errorf("erro ao iterar ledger: %v", err)
+	}
+	defer it.Close()
+
+	var out []*SupplyContract
+	for it.HasNext() {
+		kv, err := it.Next()
+		if err != nil {
+			return nil, fmt.Errorf("erro ao ler item: %v", err)
+		}
+		if !strings.HasPrefix(kv.Key, ContractKeyPrefix) {
+			continue
+		}
+		var c SupplyContract
+		if json.Unmarshal(kv.Value, &c) == nil && c.ID != "" {
+			out = append(out, &c)
+		}
+	}
+	return out, nil
+}
+
+// ReportDelivery adiciona kWh entregues ao contrato.
+// Apenas registra (não liquida) para permitir bateladas por período.
+func (s *CombinedEnergyContract) ReportDelivery(ctx contractapi.TransactionContextInterface, id string, deliveredKWh float64) error {
+	if deliveredKWh <= 0 {
+		return fmt.Errorf("deliveredKWh deve ser positivo")
+	}
+	contract, err := s.GetContract(ctx, id)
+	if err != nil {
+		return err
+	}
+	if contract.Status != "ACTIVE" {
+		return fmt.Errorf("contrato não está ativo")
+	}
+
+	// limitar para não exceder o total contratado (opcional)
+	maxAdd := contract.EnergyTotal - contract.DeliveredTotal
+	if maxAdd < 0 {
+		maxAdd = 0
+	}
+	add := deliveredKWh
+	if add > maxAdd {
+		add = maxAdd
+	}
+
+	contract.DeliveredTotal += add
+	contract.UnsettledEnergy += add
+
+	if err := ctx.GetStub().PutState(contractKey(id), mustMarshal(contract)); err != nil {
+		return fmt.Errorf("erro ao atualizar contrato: %v", err)
+	}
+
+	ev := map[string]interface{}{"contract_id": id, "delivered_add": add, "delivered_total": contract.DeliveredTotal, "unsettled": contract.UnsettledEnergy}
+	_ = ctx.GetStub().SetEvent("Supply:DeliveryReported", mustMarshal(ev))
+	return nil
+}
+
+// SettleContractPeriod liquida kWh (até o limite do que já foi entregue e não liquidado).
+// Regras:
+// 1) Faz transferência ECR seller->buyer do kWh a liquidar.
+// 2) Transfere ENGT buyer->seller (preço unitário * kWh).
+// 3) Falta ENGT? Consome do escrow do comprador (ENGT).
+// 4) Falta ECR? Consome do escrow do vendedor (ECR).
+func (s *CombinedEnergyContract) SettleContractPeriod(ctx contractapi.TransactionContextInterface, id string, kwhToSettle float64) error {
+	if kwhToSettle <= 0 {
+		return fmt.Errorf("kwhToSettle deve ser positivo")
+	}
+	contract, err := s.GetContract(ctx, id)
+	if err != nil {
+		return err
+	}
+	if contract.Status != "ACTIVE" {
+		return fmt.Errorf("contrato não está ativo")
+	}
+	if contract.UnsettledEnergy <= 0 {
+		return fmt.Errorf("não há energia pendente para liquidar")
+	}
+
+	// limitar ao que está pendente
+	amount := kwhToSettle
+	if amount > contract.UnsettledEnergy {
+		amount = contract.UnsettledEnergy
+	}
+
+	payTotal := amount * contract.PricePerKWh
+
+	// saldos atuais
+	sellerBal, err := s.GetBalance(ctx, contract.SellerID)
+	if err != nil {
+		return fmt.Errorf("erro ao ler saldo vendedor: %v", err)
+	}
+	buyerBal, err := s.GetBalance(ctx, contract.BuyerID)
+	if err != nil {
+		return fmt.Errorf("erro ao ler saldo comprador: %v", err)
+	}
+
+	// ler escrows
+	sellerEscData, _ := ctx.GetStub().GetState(escrowKey(contract.ID, "seller", "ECR"))
+	buyerEscData, _ := ctx.GetStub().GetState(escrowKey(contract.ID, "buyer", "ENGT"))
+	var sellerEsc Escrow
+	var buyerEsc Escrow
+	if sellerEscData != nil {
+		_ = json.Unmarshal(sellerEscData, &sellerEsc)
+	}
+	if buyerEscData != nil {
+		_ = json.Unmarshal(buyerEscData, &buyerEsc)
+	}
+
+	// 1) Entrega de energia: prioriza saldo livre do vendedor; faltando, usa escrow do vendedor
+	needECR := amount
+	useFreeECR := minF(sellerBal.ECR, needECR)
+	sellerBal.ECR -= useFreeECR
+	needECR -= useFreeECR
+
+	useEscECR := 0.0
+	if needECR > 0 {
+		useEscECR = minF(sellerEsc.Amount, needECR)
+		sellerEsc.Amount -= useEscECR
+		needECR -= useEscECR
+	}
+	if needECR > 0 {
+		return fmt.Errorf("ECR insuficiente (livre+escrow) para liquidar %.2f kWh", amount)
+	}
+
+	// Creditar ECR no comprador
+	buyerBal.ECR += amount
+
+	// 2) Pagamento: prioriza saldo livre do comprador; faltando, usa escrow do comprador
+	needENGT := payTotal
+	useFreeENGT := minF(buyerBal.ENGT, needENGT)
+	buyerBal.ENGT -= useFreeENGT
+	needENGT -= useFreeENGT
+
+	useEscENGT := 0.0
+	if needENGT > 0 {
+		useEscENGT = minF(buyerEsc.Amount, needENGT)
+		buyerEsc.Amount -= useEscENGT
+		needENGT -= useEscENGT
+	}
+	if needENGT > 0 {
+		// rollback simples do crédito ECR no comprador e débitos feitos
+		buyerBal.ECR -= amount
+		sellerBal.ECR += useFreeECR
+		sellerEsc.Amount += useEscECR
+		return fmt.Errorf("ENGT insuficiente (livre+escrow) para pagar %.2f", payTotal)
+	}
+
+	// Creditar ENGT no vendedor
+	sellerBal.ENGT += payTotal
+
+	// Persistir saldos atualizados
+	if err := ctx.GetStub().PutState(balanceKey(contract.SellerID), mustMarshal(sellerBal)); err != nil {
+		return fmt.Errorf("erro ao salvar saldo vendedor: %v", err)
+	}
+	if err := ctx.GetStub().PutState(balanceKey(contract.BuyerID), mustMarshal(buyerBal)); err != nil {
+		// rollback vendedor se falhar
+		sellerBal.ENGT -= payTotal
+		sellerBal.ECR += useFreeECR
+		sellerEsc.Amount += useEscECR
+		_ = ctx.GetStub().PutState(balanceKey(contract.SellerID), mustMarshal(sellerBal))
+		return fmt.Errorf("erro ao salvar saldo comprador: %v", err)
+	}
+
+	// persistir escrows (se existirem)
+	if sellerEscData != nil {
+		if err := ctx.GetStub().PutState(escrowKey(contract.ID, "seller", "ECR"), mustMarshal(sellerEsc)); err != nil {
+			return fmt.Errorf("erro ao salvar escrow vendedor: %v", err)
+		}
+	}
+	if buyerEscData != nil {
+		if err := ctx.GetStub().PutState(escrowKey(contract.ID, "buyer", "ENGT"), mustMarshal(buyerEsc)); err != nil {
+			return fmt.Errorf("erro ao salvar escrow comprador: %v", err)
+		}
+	}
+
+	// atualizar contrato
+	contract.UnsettledEnergy -= amount
+	contract.LastSettleAt = time.Now().UTC().Format(time.RFC3339)
+	if err := ctx.GetStub().PutState(contractKey(contract.ID), mustMarshal(contract)); err != nil {
+		return fmt.Errorf("erro ao atualizar contrato: %v", err)
+	}
+
+	// evento
+	ev := map[string]interface{}{
+		"contract_id": contract.ID, "kwh_settled": amount,
+		"price_total": payTotal, "last_settle_at": contract.LastSettleAt,
+	}
+	_ = ctx.GetStub().SetEvent("Supply:ContractSettled", mustMarshal(ev))
+	return nil
+}
+
+func minF(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// CloseContract finaliza o contrato.
+// Regras do encerramento v1:
+//   - Se não há energia pendente (UnsettledEnergy == 0 e DeliveredTotal >= EnergyTotal), devolve colaterais aos donos.
+//   - Se há energia contratada não entregue (EnergyTotal > DeliveredTotal), penaliza vendedor:
+//     transfere TODO o escrow ECR remanescente do vendedor para o comprador (como ECR).
+//     Buyer escrow (ENGT) remanescente é devolvido ao comprador.
+func (s *CombinedEnergyContract) CloseContract(ctx contractapi.TransactionContextInterface, id string) error {
+	contract, err := s.GetContract(ctx, id)
+	if err != nil {
+		return err
+	}
+	if contract.Status != "ACTIVE" {
+		return fmt.Errorf("contrato não está ativo")
+	}
+
+	// carregar saldos e escrows
+	sellerBal, err := s.GetBalance(ctx, contract.SellerID)
+	if err != nil {
+		return fmt.Errorf("erro saldo vendedor: %v", err)
+	}
+	buyerBal, err := s.GetBalance(ctx, contract.BuyerID)
+	if err != nil {
+		return fmt.Errorf("erro saldo comprador: %v", err)
+	}
+
+	// escrows
+	sellerEscData, _ := ctx.GetStub().GetState(escrowKey(contract.ID, "seller", "ECR"))
+	buyerEscData, _ := ctx.GetStub().GetState(escrowKey(contract.ID, "buyer", "ENGT"))
+	var sellerEsc Escrow
+	var buyerEsc Escrow
+	if sellerEscData != nil {
+		_ = json.Unmarshal(sellerEscData, &sellerEsc)
+	}
+	if buyerEscData != nil {
+		_ = json.Unmarshal(buyerEscData, &buyerEsc)
+	}
+
+	undelivered := contract.EnergyTotal - contract.DeliveredTotal
+	if undelivered < 0 {
+		undelivered = 0
+	}
+
+	// Caso A: tudo entregue e liquidado (sem pendências)
+	if undelivered == 0 && contract.UnsettledEnergy == 0 {
+		// devolver colaterais
+		if sellerEsc.Amount > 0 {
+			sellerBal.ECR += sellerEsc.Amount
+			sellerEsc.Amount = 0
+			if err := ctx.GetStub().PutState(balanceKey(contract.SellerID), mustMarshal(sellerBal)); err != nil {
+				return fmt.Errorf("erro ao devolver escrow do vendedor: %v", err)
+			}
+			_ = ctx.GetStub().DelState(escrowKey(contract.ID, "seller", "ECR"))
+		}
+		if buyerEsc.Amount > 0 {
+			buyerBal.ENGT += buyerEsc.Amount
+			buyerEsc.Amount = 0
+			if err := ctx.GetStub().PutState(balanceKey(contract.BuyerID), mustMarshal(buyerBal)); err != nil {
+				return fmt.Errorf("erro ao devolver escrow do comprador: %v", err)
+			}
+			_ = ctx.GetStub().DelState(escrowKey(contract.ID, "buyer", "ENGT"))
+		}
+	} else {
+		// Caso B: há entrega pendente → penaliza vendedor com seu escrow ECR
+		penaltyECR := sellerEsc.Amount
+		if penaltyECR > 0 {
+			// transfere ECR do escrow do vendedor para o comprador
+			buyerBal.ECR += penaltyECR
+			sellerEsc.Amount = 0
+
+			if err := ctx.GetStub().PutState(balanceKey(contract.BuyerID), mustMarshal(buyerBal)); err != nil {
+				return fmt.Errorf("erro ao aplicar penalidade (creditar comprador): %v", err)
+			}
+			_ = ctx.GetStub().DelState(escrowKey(contract.ID, "seller", "ECR"))
+		}
+		// Buyer escrow retorna ao comprador (não há débito a aplicar aqui)
+		if buyerEsc.Amount > 0 {
+			buyerBal.ENGT += buyerEsc.Amount
+			buyerEsc.Amount = 0
+			if err := ctx.GetStub().PutState(balanceKey(contract.BuyerID), mustMarshal(buyerBal)); err != nil {
+				return fmt.Errorf("erro ao devolver escrow do comprador: %v", err)
+			}
+			_ = ctx.GetStub().DelState(escrowKey(contract.ID, "buyer", "ENGT"))
+		}
+	}
+
+	contract.Status = "CLOSED"
+	if err := ctx.GetStub().PutState(contractKey(contract.ID), mustMarshal(contract)); err != nil {
+		return fmt.Errorf("erro ao fechar contrato: %v", err)
+	}
+
+	ev := map[string]interface{}{
+		"contract_id": id,
+		"undelivered": undelivered,
+		"status":      "CLOSED",
+	}
+	_ = ctx.GetStub().SetEvent("Supply:ContractClosed", mustMarshal(ev))
+	return nil
 }
 
 // -------------------------
