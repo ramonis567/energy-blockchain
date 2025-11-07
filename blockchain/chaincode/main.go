@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -317,7 +318,12 @@ func (s *CombinedEnergyContract) GetAgentFullInfo(ctx contractapi.TransactionCon
 // ========================================================
 
 // FIXED: Mint with proper error handling
-func (c *CombinedEnergyContract) Mint(ctx contractapi.TransactionContextInterface, agentID string, tokenType string, amount float64) error {
+func (c *CombinedEnergyContract) Mint(ctx contractapi.TransactionContextInterface, agentID string, tokenType string, amountStr string) error {
+	amount, err := strconv.ParseFloat(amountStr, 64)
+	if err != nil {
+		return fmt.Errorf("valor inválido para amount: %s", amountStr)
+	}
+
 	if amount <= 0 {
 		return fmt.Errorf("quantidade inválida: %.2f", amount)
 	}
@@ -375,7 +381,12 @@ func (c *CombinedEnergyContract) Mint(ctx contractapi.TransactionContextInterfac
 }
 
 // FIXED: Transfer with comprehensive error handling
-func (c *CombinedEnergyContract) Transfer(ctx contractapi.TransactionContextInterface, from string, to string, tokenType string, amount float64) error {
+func (c *CombinedEnergyContract) Transfer(ctx contractapi.TransactionContextInterface, from string, to string, tokenType string, amountStr string) error {
+	amount, err := strconv.ParseFloat(amountStr, 64)
+	if err != nil {
+		return fmt.Errorf("valor inválido para amount: %s", amountStr)
+	}
+
 	if amount <= 0 {
 		return fmt.Errorf("quantidade inválida")
 	}

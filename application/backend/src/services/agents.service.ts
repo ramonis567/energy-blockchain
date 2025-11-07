@@ -1,4 +1,6 @@
 import { getContract } from "../fabric/gateway";
+import { evaluate, submit } from "../fabric/invoke";
+
 
 export class AgentService {
   async getAllAgents() {
@@ -36,8 +38,7 @@ export class AgentService {
   }
 
   async registerAgent(id: string, type: string, name: string, address: string) {
-    const contract = await getContract();
-    await contract.submitTransaction("RegisterAgent", id, type, name, address);
-    return { id, status: "registered" };
+    await submit("RegisterAgent", [id, type, name, address]);
+    return { success: true, id, type, name, address };
   }
 }
