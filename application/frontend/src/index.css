@@ -1,19 +1,23 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 :root{
-  --blueColor: "#002F5F";
-  --greenColor: "#78BE20";
-  --highlightColor: "#00ADEF";
-  --surfaceColor: "#F5F7FA";
-  --textDark: "#222222";
+  --blueColor: #002F5F;
+  --greenColor: #78BE20;
+  --highlightColor: #00ADEF;
+  --surfaceColor: #d5dae2;
+  --textDark: #222222;
 }
 
 body {
-  /* margin: 0;
-  font-family: "Inter", sans-serif; */
-  @apply bg-[var(--blueColor)] text-white min-h-screen;
+  margin: 0;
+  font-family: 'Segoe UI', Tahoma, Verdana, sans-serif;
+  background-color: var(--surfaceColor);
+  color: var(--textDark);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 
