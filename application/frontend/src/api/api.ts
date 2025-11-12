@@ -7,26 +7,67 @@ export const api = axios.create({
   },
 });
 
-// 🔹 Obter todos os agentes
+/**
+ * === AGENTES ===
+ */
 export async function getAgents() {
   const response = await api.get("/agents");
   return response.data;
 }
 
-// 🔹 Registrar um ou mais agentes
 export async function registerAgent(agent: {
   id: string;
   type: string;
   name: string;
   address: string;
 }) {
-  // A rota correta conforme o backend é /agents/register
   const response = await api.post("/agents/register", agent);
   return response.data;
 }
 
-// 🔹 Mint tokens (adição de saldo)
+/**
+ * === TOKENS ===
+ */
 export async function mintTokens(agentId: string, tokenType: string, amount: string) {
-  const response = await api.post("/tokens/mint", { agentId, tokenType, amount });
+  const response = await api.post("/tokens/mint", {
+    agentId,
+    tokenType,
+    amount,
+  });
   return response.data;
+}
+
+export async function transferTokens(
+  from: string,
+  to: string,
+  tokenType: string,
+  amount: string
+) {
+  const response = await api.post("/tokens/transfer", {
+    from,
+    to,
+    tokenType,
+    amount,
+  });
+  return response.data;
+}
+
+export async function getOffers() {
+  const res = await api.get("/offers");
+  return res.data;
+}
+
+export async function createOffer(payload: {
+  id: string;
+  sellerId: string;
+  energyAmount: number;
+  pricePerKWh: number;
+}) {
+  const res = await api.post("/offers/create", payload);
+  return res.data;
+}
+
+export async function acceptOffer(payload: { id: string; buyerId: string }) {
+  const res = await api.post("/offers/accept", payload);
+  return res.data;
 }
