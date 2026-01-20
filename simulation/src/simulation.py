@@ -1,5 +1,6 @@
 import json
 import time
+import os
 
 from datetime import datetime, timedelta, timezone
 from generators.init_user_data import get_average_energy_consumption, get_average_energy_generation, get_energy_storage_capacity
@@ -15,8 +16,20 @@ simulation_time = datetime.combine(today.date(), datetime.min.time(), tzinfo=tim
 def simulate():
     global users_static, simulation_time
 
+    last_modified_time = 0
+    users_dynamic = []
+
     while True:
-        users_dynamic = json.load(open("simulation/src/data/users.json"))["users"]
+        try:
+            current_modified_time = os.path.getmtime("simulation/src/data/users.json")
+            if current_modified_time > last_modified_time:
+                with open("simulation/src/data/users.json") as f:
+                    users_dynamic = json.load(f)["users"]
+                last_modified_time = current_modified_time
+        except FileNotFoundError:
+            print("File not found: simulation/src/data/users.json")
+            time.sleep(1)
+            continue
 
         ids_users_dynamic = {user["id"] for user in users_dynamic}
         id_users_static = {user["id"] for user in users_static}
