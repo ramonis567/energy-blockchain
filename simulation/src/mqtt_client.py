@@ -1,8 +1,13 @@
 import paho.mqtt.client as mqtt
 from config import MQTT_BROKER, MQTT_PORT
 
-def publish_data(topic, data):
-    client = mqtt.Client()
+client = mqtt.Client()
+
+def connect():
     client.connect(MQTT_BROKER, MQTT_PORT)
-    client.publish(topic, data)
+
+def disconnect():
     client.disconnect()
+
+def publish_data(topic, data):
+    client.publish(topic, data)
