@@ -221,13 +221,6 @@ func (s *CombinedEnergyContract) GetAgent(ctx contractapi.TransactionContextInte
 		return nil, fmt.Errorf("erro ao desserializar agente: %v", err)
 	}
 
-	// FIX: Update agent balances with current token balances
-	balance, err := s.GetBalance(ctx, id)
-	if err == nil {
-		agent.ECRBalance = balance.ECR
-		agent.ENGTBalance = balance.ENGT
-	}
-
 	return &agent, nil
 }
 
@@ -255,12 +248,6 @@ func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContext
 			continue
 		}
 		if a.ID != "" {
-			// FIX: Update agent balances with current token balances
-			balance, err := s.GetBalance(ctx, a.ID)
-			if err == nil {
-				a.ECRBalance = balance.ECR
-				a.ENGTBalance = balance.ENGT
-			}
 			agents = append(agents, &a)
 		}
 	}
