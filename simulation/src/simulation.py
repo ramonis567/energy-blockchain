@@ -46,6 +46,7 @@ def simulate():
                 user["energy_storage_capacity"] = get_energy_storage_capacity(user["type"])
                 users_static.append(user)
 
+        timestamp_str = simulation_time.isoformat()
         for user in users_static:
             user_id= user.get("id")
             user_type = user.get("type")
@@ -62,7 +63,7 @@ def simulate():
             energy_storage = simulate_storage(user_type, user_class, energy_storage_cap)
 
             payload = {
-                "timestamp": simulation_time.isoformat(),
+                "timestamp": timestamp_str,
                 "user_id": user_id,
                 "user_type": user_type,
                 "energy_consumption": round(energy_consumption, 3),
