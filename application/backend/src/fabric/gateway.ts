@@ -15,7 +15,7 @@ export async function getContract(): Promise<Contract> {
     try {
       // 👉 Load the connection profile (JSON)
       const ccpPath = process.env.CONNECTION_PROFILE!;
-      const ccp = JSON.parse(fs.readFileSync(ccpPath, "utf8"));
+      const ccp = JSON.parse(await fs.promises.readFile(ccpPath, "utf8"));
 
       // Load the local wallet (Admin@org1)
       const wallet = await Wallets.newFileSystemWallet("./src/fabric/wallet");
