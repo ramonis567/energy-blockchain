@@ -37,7 +37,8 @@ def simulate():
         removed_users = id_users_static - ids_users_dynamic
         added_users = ids_users_dynamic - id_users_static
 
-        users_static = [user for user in users_static if user["id"] not in removed_users]
+        if removed_users:
+            users_static = [user for user in users_static if user["id"] not in removed_users]
 
         for user in users_dynamic:
             if user["id"] in added_users:

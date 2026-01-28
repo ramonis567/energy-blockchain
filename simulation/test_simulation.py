@@ -21,7 +21,7 @@ class TestSimulation(unittest.TestCase):
 
     @patch('simulation.publish_data')
     @patch('simulation.time.sleep')
-    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"users":[]}')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"users":[{"id": "test_user", "type": "consumer", "class": "residential"}]}')
     def test_simulate_runs_once(self, mock_open, mock_sleep, mock_publish):
         # We want the simulation to run only once for this test
         mock_sleep.side_effect = InterruptedError
