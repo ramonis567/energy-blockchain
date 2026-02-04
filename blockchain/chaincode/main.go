@@ -758,7 +758,11 @@ func (s *CombinedEnergyContract) AcceptOffer(
 }
 
 func (s *CombinedEnergyContract) GetAllOffers(ctx contractapi.TransactionContextInterface) ([]*Offer, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	// Optimization: use scoped range query instead of full table scan
+	startKey := OfferKeyPrefix
+	endKey := OfferKeyPrefix + "\uffff"
+
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
 	}
@@ -770,9 +774,7 @@ func (s *CombinedEnergyContract) GetAllOffers(ctx contractapi.TransactionContext
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
 		}
-		if !strings.HasPrefix(kv.Key, OfferKeyPrefix) {
-			continue
-		}
+		// Prefix check is implicitly handled by GetStateByRange
 		var o Offer
 		if json.Unmarshal(kv.Value, &o) == nil && o.ID != "" {
 			offers = append(offers, &o)
