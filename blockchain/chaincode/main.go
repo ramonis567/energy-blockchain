@@ -233,7 +233,12 @@ func (s *CombinedEnergyContract) GetAgent(ctx contractapi.TransactionContextInte
 
 // FIXED: GetAllAgents now returns agents with updated balances
 func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContextInterface) ([]*Agent, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	// Optimization: limit range scan to AgentKeyPrefix
+	endKeyBytes := []byte(AgentKeyPrefix)
+	endKeyBytes[len(endKeyBytes)-1]++
+	endKey := string(endKeyBytes)
+
+	it, err := ctx.GetStub().GetStateByRange(AgentKeyPrefix, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
 	}
@@ -246,9 +251,10 @@ func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContext
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
 		}
 
-		if !strings.HasPrefix(kv.Key, AgentKeyPrefix) {
-			continue
-		}
+		// Prefix check is now implicit due to range query, but keeping it for safety/clarity is fine,
+		// though strictly unnecessary if range is correct.
+		// However, since we used range query, we can remove the explicit check or leave it.
+		// Removing it is better optimization to avoid string function call.
 
 		var a Agent
 		if err := json.Unmarshal(kv.Value, &a); err != nil {
