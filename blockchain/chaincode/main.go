@@ -221,12 +221,6 @@ func (s *CombinedEnergyContract) GetAgent(ctx contractapi.TransactionContextInte
 		return nil, fmt.Errorf("erro ao desserializar agente: %v", err)
 	}
 
-	// FIX: Update agent balances with current token balances
-	balance, err := s.GetBalance(ctx, id)
-	if err == nil {
-		agent.ECRBalance = balance.ECR
-		agent.ENGTBalance = balance.ENGT
-	}
 
 	return &agent, nil
 }
