@@ -52,6 +52,17 @@ func escrowKey(contractID, party, token string) string {
 	return EscrowKeyPrefix + contractID + ":" + party + ":" + token
 }
 
+func getRangeForPrefix(prefix string) (string, string) {
+	if len(prefix) == 0 {
+		return "", ""
+	}
+	prefixBytes := []byte(prefix)
+	endKeyBytes := make([]byte, len(prefixBytes))
+	copy(endKeyBytes, prefixBytes)
+	endKeyBytes[len(endKeyBytes)-1]++
+	return prefix, string(endKeyBytes)
+}
+
 func mustMarshal(v interface{}) []byte {
 	b, _ := json.Marshal(v)
 	return b
@@ -758,7 +769,8 @@ func (s *CombinedEnergyContract) AcceptOffer(
 }
 
 func (s *CombinedEnergyContract) GetAllOffers(ctx contractapi.TransactionContextInterface) ([]*Offer, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	startKey, endKey := getRangeForPrefix(OfferKeyPrefix)
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
 	}
@@ -770,9 +782,7 @@ func (s *CombinedEnergyContract) GetAllOffers(ctx contractapi.TransactionContext
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
 		}
-		if !strings.HasPrefix(kv.Key, OfferKeyPrefix) {
-			continue
-		}
+		// Prefix check is now implicit due to range query
 		var o Offer
 		if json.Unmarshal(kv.Value, &o) == nil && o.ID != "" {
 			offers = append(offers, &o)
