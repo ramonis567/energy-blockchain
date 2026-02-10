@@ -958,7 +958,8 @@ func (s *CombinedEnergyContract) GetContract(ctx contractapi.TransactionContextI
 }
 
 func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionContextInterface) ([]*SupplyContract, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	// Optimization: Scoped range query to avoid full ledger scan
+	it, err := ctx.GetStub().GetStateByRange(ContractKeyPrefix, ContractKeyPrefix+"\uffff")
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar ledger: %v", err)
 	}
