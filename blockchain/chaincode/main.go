@@ -958,7 +958,9 @@ func (s *CombinedEnergyContract) GetContract(ctx contractapi.TransactionContextI
 }
 
 func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionContextInterface) ([]*SupplyContract, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	// Optimization: Use scoped range query instead of full scan
+	// \uffff is a high unicode character, effectively serving as an open-ended upper bound for the prefix
+	it, err := ctx.GetStub().GetStateByRange(ContractKeyPrefix, ContractKeyPrefix+"\uffff")
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar ledger: %v", err)
 	}
@@ -970,9 +972,7 @@ func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionCont
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler item: %v", err)
 		}
-		if !strings.HasPrefix(kv.Key, ContractKeyPrefix) {
-			continue
-		}
+		// Prefix check is implicitly handled by GetStateByRange
 		var c SupplyContract
 		if json.Unmarshal(kv.Value, &c) == nil && c.ID != "" {
 			out = append(out, &c)
