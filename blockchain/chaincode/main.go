@@ -233,7 +233,11 @@ func (s *CombinedEnergyContract) GetAgent(ctx contractapi.TransactionContextInte
 
 // FIXED: GetAllAgents now returns agents with updated balances
 func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContextInterface) ([]*Agent, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	// Optimization: Use prefix range query
+	startKey := AgentKeyPrefix
+	endKey := AgentKeyPrefix[:len(AgentKeyPrefix)-1] + string(AgentKeyPrefix[len(AgentKeyPrefix)-1]+1)
+
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
 	}
@@ -246,18 +250,24 @@ func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContext
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
 		}
 
+		// Double check prefix (redundant with correct range, but safe)
 		if !strings.HasPrefix(kv.Key, AgentKeyPrefix) {
 			continue
 		}
 
 		var a Agent
 		if err := json.Unmarshal(kv.Value, &a); err != nil {
+			log.Printf("Error unmarshalling agent: %v", err)
 			continue
 		}
 		if a.ID != "" {
-			// FIX: Update agent balances with current token balances
+			// Synchronize agent balances with current token balances from the ledger
+			// This ensures that the returned agent object reflects the most up-to-date
+			// balance state, preventing stale data issues.
 			balance, err := s.GetBalance(ctx, a.ID)
-			if err == nil {
+			if err != nil {
+				log.Printf("Warning: Failed to fetch balance for agent %s: %v", a.ID, err)
+			} else {
 				a.ECRBalance = balance.ECR
 				a.ENGTBalance = balance.ENGT
 			}
