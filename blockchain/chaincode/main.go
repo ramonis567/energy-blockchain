@@ -255,12 +255,6 @@ func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContext
 			continue
 		}
 		if a.ID != "" {
-			// FIX: Update agent balances with current token balances
-			balance, err := s.GetBalance(ctx, a.ID)
-			if err == nil {
-				a.ECRBalance = balance.ECR
-				a.ENGTBalance = balance.ENGT
-			}
 			agents = append(agents, &a)
 		}
 	}
