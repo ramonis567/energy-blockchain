@@ -958,7 +958,8 @@ func (s *CombinedEnergyContract) GetContract(ctx contractapi.TransactionContextI
 }
 
 func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionContextInterface) ([]*SupplyContract, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	// Optimization: Use a scoped range query instead of scanning the full ledger
+	it, err := ctx.GetStub().GetStateByRange(ContractKeyPrefix, ContractKeyPrefix+"\uffff")
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar ledger: %v", err)
 	}
@@ -970,6 +971,8 @@ func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionCont
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler item: %v", err)
 		}
+		// The range query guarantees we only get keys with the prefix,
+		// but we still check just in case (e.g. if the range is loose)
 		if !strings.HasPrefix(kv.Key, ContractKeyPrefix) {
 			continue
 		}
