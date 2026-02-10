@@ -1117,7 +1117,7 @@ func (s *CombinedEnergyContract) SettleContractPeriod(ctx contractapi.Transactio
 		return fmt.Errorf("erro ao salvar saldo comprador: %v", err)
 	}
 
-	// FIX: Update agent records after successful settlement
+	// Update agent records after successful settlement
 	sellerAgent, err := s.GetAgent(ctx, contract.SellerID)
 	if err == nil {
 		sellerAgent.ECRBalance = sellerBal.ECR
