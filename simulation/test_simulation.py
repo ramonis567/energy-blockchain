@@ -20,9 +20,11 @@ from simulation import simulate
 class TestSimulation(unittest.TestCase):
 
     @patch('simulation.publish_data')
+    @patch('simulation.connect')
+    @patch('simulation.disconnect')
     @patch('simulation.time.sleep')
-    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"users":[]}')
-    def test_simulate_runs_once(self, mock_open, mock_sleep, mock_publish):
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"users":[{"id": "1", "type": "consumer", "class": "residential"}]}')
+    def test_simulate_runs_once(self, mock_open, mock_sleep, mock_disconnect, mock_connect, mock_publish):
         # We want the simulation to run only once for this test
         mock_sleep.side_effect = InterruptedError
 
@@ -33,6 +35,12 @@ class TestSimulation(unittest.TestCase):
 
         # Check that publish_data was called
         self.assertTrue(mock_publish.called)
+
+        # Check that connect was called
+        self.assertTrue(mock_connect.called)
+
+        # Check that disconnect was called (due to InterruptedError handled in finally block)
+        self.assertTrue(mock_disconnect.called)
 
 if __name__ == '__main__':
     unittest.main()
