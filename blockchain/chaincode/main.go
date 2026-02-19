@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // ========================================================
-// Merged Chaincode: AgentRegistry + EnergyToken + SpotMarket + ContractMarket - COMPLETELY FIXED VERSION
+// Merged Chaincode: AgentRegistry + EnergyToken + SpotMarket + ContractMarket
 // ========================================================
 
 package main
@@ -50,6 +50,15 @@ func contractKey(id string) string {
 
 func escrowKey(contractID, party, token string) string {
 	return EscrowKeyPrefix + contractID + ":" + party + ":" + token
+}
+
+func getRangeForPrefix(prefix string) (string, string) {
+	if prefix == "" {
+		return "", ""
+	}
+	startKey := prefix
+	endKey := prefix[:len(prefix)-1] + string(prefix[len(prefix)-1]+1)
+	return startKey, endKey
 }
 
 func mustMarshal(v interface{}) []byte {
@@ -141,8 +150,33 @@ type CombinedEnergyContract struct {
 	contractapi.Contract
 }
 
+func (s *CombinedEnergyContract) updateAgentBalance(ctx contractapi.TransactionContextInterface, agentID string, balance *TokenBalance) error {
+	agentJSON, err := ctx.GetStub().GetState(agentKey(agentID))
+	if err != nil {
+		return fmt.Errorf("erro ao acessar ledger para atualizar agente: %v", err)
+	}
+	if agentJSON == nil {
+		return nil // Agente não registrado
+	}
+
+	var agent Agent
+	if err := json.Unmarshal(agentJSON, &agent); err != nil {
+		return fmt.Errorf("erro ao desserializar agente para sincronização: %v", err)
+	}
+
+	agent.ECRBalance = balance.ECR
+	agent.ENGTBalance = balance.ENGT
+
+	agentUpdatedJSON, err := json.Marshal(agent)
+	if err != nil {
+		return fmt.Errorf("erro ao serializar agente atualizado: %v", err)
+	}
+
+	return ctx.GetStub().PutState(agentKey(agentID), agentUpdatedJSON)
+}
+
 // ========================================================
-// Agent Registry Methods - FIXED VERSION
+// Agent Registry Methods
 // ========================================================
 
 func (s *CombinedEnergyContract) RegisterAgent(ctx contractapi.TransactionContextInterface,
@@ -221,19 +255,12 @@ func (s *CombinedEnergyContract) GetAgent(ctx contractapi.TransactionContextInte
 		return nil, fmt.Errorf("erro ao desserializar agente: %v", err)
 	}
 
-	// FIX: Update agent balances with current token balances
-	balance, err := s.GetBalance(ctx, id)
-	if err == nil {
-		agent.ECRBalance = balance.ECR
-		agent.ENGTBalance = balance.ENGT
-	}
-
 	return &agent, nil
 }
 
-// FIXED: GetAllAgents now returns agents with updated balances
 func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContextInterface) ([]*Agent, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	startKey, endKey := getRangeForPrefix(AgentKeyPrefix)
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
 	}
@@ -246,28 +273,17 @@ func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContext
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
 		}
 
-		if !strings.HasPrefix(kv.Key, AgentKeyPrefix) {
-			continue
-		}
-
 		var a Agent
 		if err := json.Unmarshal(kv.Value, &a); err != nil {
 			continue
 		}
 		if a.ID != "" {
-			// FIX: Update agent balances with current token balances
-			balance, err := s.GetBalance(ctx, a.ID)
-			if err == nil {
-				a.ECRBalance = balance.ECR
-				a.ENGTBalance = balance.ENGT
-			}
 			agents = append(agents, &a)
 		}
 	}
 	return agents, nil
 }
 
-// FIXED: GetAgentsByType now returns agents with updated balances
 func (s *CombinedEnergyContract) GetAgentsByType(ctx contractapi.TransactionContextInterface, agentType string) ([]*Agent, error) {
 	all, err := s.GetAllAgents(ctx)
 	if err != nil {
@@ -330,10 +346,9 @@ func (s *CombinedEnergyContract) GetAgentFullInfo(ctx contractapi.TransactionCon
 }
 
 // ========================================================
-// Energy Token Methods - FIXED VERSION
+// Energy Token Methods
 // ========================================================
 
-// FIXED: Mint with agent balance synchronization
 func (c *CombinedEnergyContract) Mint(ctx contractapi.TransactionContextInterface, agentID string, tokenType string, amountStr string) error {
 	amount, err := strconv.ParseFloat(amountStr, 64)
 	if err != nil {
@@ -376,21 +391,8 @@ func (c *CombinedEnergyContract) Mint(ctx contractapi.TransactionContextInterfac
 		return fmt.Errorf("erro ao salvar saldo: %v", err)
 	}
 
-	// FIX: Also update the agent record to keep balances synchronized
-	agent, err := c.GetAgent(ctx, agentID)
-	if err == nil {
-		switch tokenType {
-		case "ECR":
-			agent.ECRBalance = balance.ECR
-		case "ENGT":
-			agent.ENGTBalance = balance.ENGT
-		}
-		agentJSON, err := json.Marshal(agent)
-		if err == nil {
-			if err := ctx.GetStub().PutState(agentKey(agentID), agentJSON); err != nil {
-				log.Printf("Aviso: não foi possível atualizar saldo do agente: %v", err)
-			}
-		}
+	if err := c.updateAgentBalance(ctx, agentID, &balance); err != nil {
+		return err
 	}
 
 	event := map[string]interface{}{
@@ -410,7 +412,6 @@ func (c *CombinedEnergyContract) Mint(ctx contractapi.TransactionContextInterfac
 	return nil
 }
 
-// FIXED: Transfer with agent balance synchronization
 func (c *CombinedEnergyContract) Transfer(ctx contractapi.TransactionContextInterface, from string, to string, tokenType string, amountStr string) error {
 	amount, err := strconv.ParseFloat(amountStr, 64)
 	if err != nil {
@@ -487,37 +488,11 @@ func (c *CombinedEnergyContract) Transfer(ctx contractapi.TransactionContextInte
 		return fmt.Errorf("erro ao salvar saldo do destinatário: %v", err)
 	}
 
-	// FIX: Also update agent records to keep balances synchronized
-	fromAgent, err := c.GetAgent(ctx, from)
-	if err == nil {
-		switch tokenType {
-		case "ECR":
-			fromAgent.ECRBalance = fromBal.ECR
-		case "ENGT":
-			fromAgent.ENGTBalance = fromBal.ENGT
-		}
-		fromAgentJSON, err := json.Marshal(fromAgent)
-		if err == nil {
-			if err := ctx.GetStub().PutState(agentKey(from), fromAgentJSON); err != nil {
-				log.Printf("Aviso: não foi possível atualizar saldo do agente remetente: %v", err)
-			}
-		}
+	if err := c.updateAgentBalance(ctx, from, &fromBal); err != nil {
+		return err
 	}
-
-	toAgent, err := c.GetAgent(ctx, to)
-	if err == nil {
-		switch tokenType {
-		case "ECR":
-			toAgent.ECRBalance = toBal.ECR
-		case "ENGT":
-			toAgent.ENGTBalance = toBal.ENGT
-		}
-		toAgentJSON, err := json.Marshal(toAgent)
-		if err == nil {
-			if err := ctx.GetStub().PutState(agentKey(to), toAgentJSON); err != nil {
-				log.Printf("Aviso: não foi possível atualizar saldo do agente destinatário: %v", err)
-			}
-		}
+	if err := c.updateAgentBalance(ctx, to, &toBal); err != nil {
+		return err
 	}
 
 	event := map[string]interface{}{
@@ -563,7 +538,7 @@ func (c *CombinedEnergyContract) GetBalance(ctx contractapi.TransactionContextIn
 }
 
 // ========================================================
-// Spot Market Methods - FIXED VERSION
+// Spot Market Methods
 // ========================================================
 
 func (s *CombinedEnergyContract) CreateOffer(
@@ -632,7 +607,6 @@ func (s *CombinedEnergyContract) CreateOffer(
 	return nil
 }
 
-// FIXED: AcceptOffer with agent balance synchronization
 func (s *CombinedEnergyContract) AcceptOffer(
 	ctx contractapi.TransactionContextInterface,
 	id string, buyerID string,
@@ -689,35 +663,14 @@ func (s *CombinedEnergyContract) AcceptOffer(
 		return fmt.Errorf("erro ao salvar saldo do vendedor: %v", err)
 	}
 	if err := ctx.GetStub().PutState(balanceKey(buyerID), mustMarshal(buyerBalance)); err != nil {
-		sellerBalance.ECR += offer.EnergyAmount
-		sellerBalance.ENGT -= offer.TotalPrice
-		_ = ctx.GetStub().PutState(balanceKey(offer.SellerID), mustMarshal(sellerBalance))
 		return fmt.Errorf("falha ao salvar saldo do comprador: %v", err)
 	}
 
-	// FIX: Also update agent records after spot market transaction
-	sellerAgent, err := s.GetAgent(ctx, offer.SellerID)
-	if err == nil {
-		sellerAgent.ECRBalance = sellerBalance.ECR
-		sellerAgent.ENGTBalance = sellerBalance.ENGT
-		sellerAgentJSON, err := json.Marshal(sellerAgent)
-		if err == nil {
-			if err := ctx.GetStub().PutState(agentKey(offer.SellerID), sellerAgentJSON); err != nil {
-				log.Printf("Aviso: não foi possível atualizar saldo do agente vendedor: %v", err)
-			}
-		}
+	if err := s.updateAgentBalance(ctx, offer.SellerID, sellerBalance); err != nil {
+		return err
 	}
-
-	buyerAgent, err := s.GetAgent(ctx, buyerID)
-	if err == nil {
-		buyerAgent.ECRBalance = buyerBalance.ECR
-		buyerAgent.ENGTBalance = buyerBalance.ENGT
-		buyerAgentJSON, err := json.Marshal(buyerAgent)
-		if err == nil {
-			if err := ctx.GetStub().PutState(agentKey(buyerID), buyerAgentJSON); err != nil {
-				log.Printf("Aviso: não foi possível atualizar saldo do agente comprador: %v", err)
-			}
-		}
+	if err := s.updateAgentBalance(ctx, buyerID, buyerBalance); err != nil {
+		return err
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -758,7 +711,8 @@ func (s *CombinedEnergyContract) AcceptOffer(
 }
 
 func (s *CombinedEnergyContract) GetAllOffers(ctx contractapi.TransactionContextInterface) ([]*Offer, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	startKey, endKey := getRangeForPrefix(OfferKeyPrefix)
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
 	}
@@ -769,9 +723,6 @@ func (s *CombinedEnergyContract) GetAllOffers(ctx contractapi.TransactionContext
 		kv, err := it.Next()
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
-		}
-		if !strings.HasPrefix(kv.Key, OfferKeyPrefix) {
-			continue
 		}
 		var o Offer
 		if json.Unmarshal(kv.Value, &o) == nil && o.ID != "" {
@@ -790,10 +741,9 @@ func (s *CombinedEnergyContract) OfferExists(ctx contractapi.TransactionContextI
 }
 
 // ========================================================
-// Contract Market Methods - FIXED VERSION
+// Contract Market Methods
 // ========================================================
 
-// FIXED: CreateSupplyContract with agent balance synchronization
 func (s *CombinedEnergyContract) CreateSupplyContract(
 	ctx contractapi.TransactionContextInterface,
 	id, sellerID, buyerID string,
@@ -853,16 +803,8 @@ func (s *CombinedEnergyContract) CreateSupplyContract(
 			return fmt.Errorf("erro ao salvar saldo vendedor: %v", err)
 		}
 
-		// FIX: Update agent record
-		sellerAgent, err := s.GetAgent(ctx, sellerID)
-		if err == nil {
-			sellerAgent.ECRBalance = sellerBal.ECR
-			sellerAgentJSON, err := json.Marshal(sellerAgent)
-			if err == nil {
-				if err := ctx.GetStub().PutState(agentKey(sellerID), sellerAgentJSON); err != nil {
-					log.Printf("Aviso: não foi possível atualizar saldo do agente vendedor: %v", err)
-				}
-			}
+		if err := s.updateAgentBalance(ctx, sellerID, sellerBal); err != nil {
+			return err
 		}
 
 		sellerEscrow := Escrow{
@@ -879,16 +821,8 @@ func (s *CombinedEnergyContract) CreateSupplyContract(
 			return fmt.Errorf("erro ao salvar saldo comprador: %v", err)
 		}
 
-		// FIX: Update agent record
-		buyerAgent, err := s.GetAgent(ctx, buyerID)
-		if err == nil {
-			buyerAgent.ENGTBalance = buyerBal.ENGT
-			buyerAgentJSON, err := json.Marshal(buyerAgent)
-			if err == nil {
-				if err := ctx.GetStub().PutState(agentKey(buyerID), buyerAgentJSON); err != nil {
-					log.Printf("Aviso: não foi possível atualizar saldo do agente comprador: %v", err)
-				}
-			}
+		if err := s.updateAgentBalance(ctx, buyerID, buyerBal); err != nil {
+			return err
 		}
 
 		buyerEscrow := Escrow{
@@ -958,7 +892,8 @@ func (s *CombinedEnergyContract) GetContract(ctx contractapi.TransactionContextI
 }
 
 func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionContextInterface) ([]*SupplyContract, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	startKey, endKey := getRangeForPrefix(ContractKeyPrefix)
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar ledger: %v", err)
 	}
@@ -969,9 +904,6 @@ func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionCont
 		kv, err := it.Next()
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler item: %v", err)
-		}
-		if !strings.HasPrefix(kv.Key, ContractKeyPrefix) {
-			continue
 		}
 		var c SupplyContract
 		if json.Unmarshal(kv.Value, &c) == nil && c.ID != "" {
@@ -1016,7 +948,6 @@ func (s *CombinedEnergyContract) ReportDelivery(ctx contractapi.TransactionConte
 	return nil
 }
 
-// FIXED: SettleContractPeriod with agent balance synchronization
 func (s *CombinedEnergyContract) SettleContractPeriod(ctx contractapi.TransactionContextInterface, id string, kwhToSettle float64) error {
 	if kwhToSettle <= 0 {
 		return fmt.Errorf("kwhToSettle deve ser positivo")
@@ -1109,37 +1040,14 @@ func (s *CombinedEnergyContract) SettleContractPeriod(ctx contractapi.Transactio
 		return fmt.Errorf("erro ao salvar saldo vendedor: %v", err)
 	}
 	if err := ctx.GetStub().PutState(balanceKey(contract.BuyerID), mustMarshal(buyerBal)); err != nil {
-		// rollback vendedor se falhar
-		sellerBal.ENGT -= payTotal
-		sellerBal.ECR += useFreeECR
-		sellerEsc.Amount += useEscECR
-		_ = ctx.GetStub().PutState(balanceKey(contract.SellerID), mustMarshal(sellerBal))
 		return fmt.Errorf("erro ao salvar saldo comprador: %v", err)
 	}
 
-	// FIX: Update agent records after successful settlement
-	sellerAgent, err := s.GetAgent(ctx, contract.SellerID)
-	if err == nil {
-		sellerAgent.ECRBalance = sellerBal.ECR
-		sellerAgent.ENGTBalance = sellerBal.ENGT
-		sellerAgentJSON, err := json.Marshal(sellerAgent)
-		if err == nil {
-			if err := ctx.GetStub().PutState(agentKey(contract.SellerID), sellerAgentJSON); err != nil {
-				log.Printf("Aviso: não foi possível atualizar saldo do agente vendedor: %v", err)
-			}
-		}
+	if err := s.updateAgentBalance(ctx, contract.SellerID, sellerBal); err != nil {
+		return err
 	}
-
-	buyerAgent, err := s.GetAgent(ctx, contract.BuyerID)
-	if err == nil {
-		buyerAgent.ECRBalance = buyerBal.ECR
-		buyerAgent.ENGTBalance = buyerBal.ENGT
-		buyerAgentJSON, err := json.Marshal(buyerAgent)
-		if err == nil {
-			if err := ctx.GetStub().PutState(agentKey(contract.BuyerID), buyerAgentJSON); err != nil {
-				log.Printf("Aviso: não foi possível atualizar saldo do agente comprador: %v", err)
-			}
-		}
+	if err := s.updateAgentBalance(ctx, contract.BuyerID, buyerBal); err != nil {
+		return err
 	}
 
 	// persistir escrows (se existirem)
@@ -1170,7 +1078,6 @@ func (s *CombinedEnergyContract) SettleContractPeriod(ctx contractapi.Transactio
 	return nil
 }
 
-// FIXED: CloseContract with agent balance synchronization
 func (s *CombinedEnergyContract) CloseContract(ctx contractapi.TransactionContextInterface, id string) error {
 	contract, err := s.GetContract(ctx, id)
 	if err != nil {
@@ -1217,16 +1124,8 @@ func (s *CombinedEnergyContract) CloseContract(ctx contractapi.TransactionContex
 				return fmt.Errorf("erro ao devolver escrow do vendedor: %v", err)
 			}
 
-			// FIX: Update agent record
-			sellerAgent, err := s.GetAgent(ctx, contract.SellerID)
-			if err == nil {
-				sellerAgent.ECRBalance = sellerBal.ECR
-				sellerAgentJSON, err := json.Marshal(sellerAgent)
-				if err == nil {
-					if err := ctx.GetStub().PutState(agentKey(contract.SellerID), sellerAgentJSON); err != nil {
-						log.Printf("Aviso: não foi possível atualizar saldo do agente vendedor: %v", err)
-					}
-				}
+			if err := s.updateAgentBalance(ctx, contract.SellerID, sellerBal); err != nil {
+				return err
 			}
 
 			_ = ctx.GetStub().DelState(escrowKey(contract.ID, "seller", "ECR"))
@@ -1238,16 +1137,8 @@ func (s *CombinedEnergyContract) CloseContract(ctx contractapi.TransactionContex
 				return fmt.Errorf("erro ao devolver escrow do comprador: %v", err)
 			}
 
-			// FIX: Update agent record
-			buyerAgent, err := s.GetAgent(ctx, contract.BuyerID)
-			if err == nil {
-				buyerAgent.ENGTBalance = buyerBal.ENGT
-				buyerAgentJSON, err := json.Marshal(buyerAgent)
-				if err == nil {
-					if err := ctx.GetStub().PutState(agentKey(contract.BuyerID), buyerAgentJSON); err != nil {
-						log.Printf("Aviso: não foi possível atualizar saldo do agente comprador: %v", err)
-					}
-				}
+			if err := s.updateAgentBalance(ctx, contract.BuyerID, buyerBal); err != nil {
+				return err
 			}
 
 			_ = ctx.GetStub().DelState(escrowKey(contract.ID, "buyer", "ENGT"))
@@ -1264,27 +1155,11 @@ func (s *CombinedEnergyContract) CloseContract(ctx contractapi.TransactionContex
 				return fmt.Errorf("erro ao aplicar penalidade (creditar comprador): %v", err)
 			}
 
-			// FIX: Update both agent records
-			sellerAgent, err := s.GetAgent(ctx, contract.SellerID)
-			if err == nil {
-				sellerAgent.ECRBalance = sellerBal.ECR
-				sellerAgentJSON, err := json.Marshal(sellerAgent)
-				if err == nil {
-					if err := ctx.GetStub().PutState(agentKey(contract.SellerID), sellerAgentJSON); err != nil {
-						log.Printf("Aviso: não foi possível atualizar saldo do agente vendedor: %v", err)
-					}
-				}
+			if err := s.updateAgentBalance(ctx, contract.SellerID, sellerBal); err != nil {
+				return err
 			}
-
-			buyerAgent, err := s.GetAgent(ctx, contract.BuyerID)
-			if err == nil {
-				buyerAgent.ECRBalance = buyerBal.ECR
-				buyerAgentJSON, err := json.Marshal(buyerAgent)
-				if err == nil {
-					if err := ctx.GetStub().PutState(agentKey(contract.BuyerID), buyerAgentJSON); err != nil {
-						log.Printf("Aviso: não foi possível atualizar saldo do agente comprador: %v", err)
-					}
-				}
+			if err := s.updateAgentBalance(ctx, contract.BuyerID, buyerBal); err != nil {
+				return err
 			}
 
 			_ = ctx.GetStub().DelState(escrowKey(contract.ID, "seller", "ECR"))
@@ -1297,16 +1172,8 @@ func (s *CombinedEnergyContract) CloseContract(ctx contractapi.TransactionContex
 				return fmt.Errorf("erro ao devolver escrow do comprador: %v", err)
 			}
 
-			// FIX: Update agent record
-			buyerAgent, err := s.GetAgent(ctx, contract.BuyerID)
-			if err == nil {
-				buyerAgent.ENGTBalance = buyerBal.ENGT
-				buyerAgentJSON, err := json.Marshal(buyerAgent)
-				if err == nil {
-					if err := ctx.GetStub().PutState(agentKey(contract.BuyerID), buyerAgentJSON); err != nil {
-						log.Printf("Aviso: não foi possível atualizar saldo do agente comprador: %v", err)
-					}
-				}
+			if err := s.updateAgentBalance(ctx, contract.BuyerID, buyerBal); err != nil {
+				return err
 			}
 
 			_ = ctx.GetStub().DelState(escrowKey(contract.ID, "buyer", "ENGT"))
