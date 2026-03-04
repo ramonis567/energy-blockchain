@@ -52,6 +52,44 @@ func escrowKey(contractID, party, token string) string {
 	return EscrowKeyPrefix + contractID + ":" + party + ":" + token
 }
 
+func getRangeForPrefix(prefix string) (string, string) {
+	return prefix, prefix + "\uffff"
+}
+
+// updateAgentsBalances fills the ECR and ENGT balances for a list of agents using a single range query
+func (s *CombinedEnergyContract) updateAgentsBalances(ctx contractapi.TransactionContextInterface, agents []*Agent) {
+	if len(agents) == 0 {
+		return
+	}
+
+	balStart, balEnd := getRangeForPrefix(BalanceKeyPrefix)
+	balIt, err := ctx.GetStub().GetStateByRange(balStart, balEnd)
+	if err != nil {
+		log.Printf("Aviso: falha ao buscar saldos em lote: %v", err)
+		return
+	}
+	defer balIt.Close()
+
+	balances := make(map[string]TokenBalance)
+	for balIt.HasNext() {
+		kv, err := balIt.Next()
+		if err != nil {
+			continue
+		}
+		var tb TokenBalance
+		if err := json.Unmarshal(kv.Value, &tb); err == nil {
+			balances[tb.AgentID] = tb
+		}
+	}
+
+	for _, a := range agents {
+		if b, ok := balances[a.ID]; ok {
+			a.ECRBalance = b.ECR
+			a.ENGTBalance = b.ENGT
+		}
+	}
+}
+
 func mustMarshal(v interface{}) []byte {
 	b, _ := json.Marshal(v)
 	return b
@@ -231,9 +269,10 @@ func (s *CombinedEnergyContract) GetAgent(ctx contractapi.TransactionContextInte
 	return &agent, nil
 }
 
-// FIXED: GetAllAgents now returns agents with updated balances
+// FIXED: GetAllAgents now returns agents with updated balances (Optimized with Batching)
 func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContextInterface) ([]*Agent, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	startKey, endKey := getRangeForPrefix(AgentKeyPrefix)
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
 	}
@@ -246,40 +285,49 @@ func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContext
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
 		}
 
-		if !strings.HasPrefix(kv.Key, AgentKeyPrefix) {
+		var a Agent
+		if err := json.Unmarshal(kv.Value, &a); err != nil {
 			continue
+		}
+		if a.ID != "" {
+			agents = append(agents, &a)
+		}
+	}
+
+	// Batch update balances to avoid N+1 queries
+	s.updateAgentsBalances(ctx, agents)
+
+	return agents, nil
+}
+
+// FIXED: GetAgentsByType now returns agents with updated balances (Optimized with Filtering during iteration and Batching)
+func (s *CombinedEnergyContract) GetAgentsByType(ctx contractapi.TransactionContextInterface, agentType string) ([]*Agent, error) {
+	startKey, endKey := getRangeForPrefix(AgentKeyPrefix)
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
+	}
+	defer it.Close()
+
+	var out []*Agent
+	for it.HasNext() {
+		kv, err := it.Next()
+		if err != nil {
+			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
 		}
 
 		var a Agent
 		if err := json.Unmarshal(kv.Value, &a); err != nil {
 			continue
 		}
-		if a.ID != "" {
-			// FIX: Update agent balances with current token balances
-			balance, err := s.GetBalance(ctx, a.ID)
-			if err == nil {
-				a.ECRBalance = balance.ECR
-				a.ENGTBalance = balance.ENGT
-			}
-			agents = append(agents, &a)
-		}
-	}
-	return agents, nil
-}
-
-// FIXED: GetAgentsByType now returns agents with updated balances
-func (s *CombinedEnergyContract) GetAgentsByType(ctx contractapi.TransactionContextInterface, agentType string) ([]*Agent, error) {
-	all, err := s.GetAllAgents(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var out []*Agent
-	for _, a := range all {
 		if a.Type == agentType {
-			out = append(out, a)
+			out = append(out, &a)
 		}
 	}
+
+	// Batch update balances for matching agents
+	s.updateAgentsBalances(ctx, out)
+
 	return out, nil
 }
 
@@ -758,7 +806,8 @@ func (s *CombinedEnergyContract) AcceptOffer(
 }
 
 func (s *CombinedEnergyContract) GetAllOffers(ctx contractapi.TransactionContextInterface) ([]*Offer, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	startKey, endKey := getRangeForPrefix(OfferKeyPrefix)
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
 	}
@@ -769,9 +818,6 @@ func (s *CombinedEnergyContract) GetAllOffers(ctx contractapi.TransactionContext
 		kv, err := it.Next()
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
-		}
-		if !strings.HasPrefix(kv.Key, OfferKeyPrefix) {
-			continue
 		}
 		var o Offer
 		if json.Unmarshal(kv.Value, &o) == nil && o.ID != "" {
@@ -958,7 +1004,8 @@ func (s *CombinedEnergyContract) GetContract(ctx contractapi.TransactionContextI
 }
 
 func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionContextInterface) ([]*SupplyContract, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	startKey, endKey := getRangeForPrefix(ContractKeyPrefix)
+	it, err := ctx.GetStub().GetStateByRange(startKey, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar ledger: %v", err)
 	}
@@ -969,9 +1016,6 @@ func (s *CombinedEnergyContract) GetAllContracts(ctx contractapi.TransactionCont
 		kv, err := it.Next()
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler item: %v", err)
-		}
-		if !strings.HasPrefix(kv.Key, ContractKeyPrefix) {
-			continue
 		}
 		var c SupplyContract
 		if json.Unmarshal(kv.Value, &c) == nil && c.ID != "" {
