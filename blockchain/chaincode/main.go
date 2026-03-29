@@ -233,7 +233,12 @@ func (s *CombinedEnergyContract) GetAgent(ctx contractapi.TransactionContextInte
 
 // FIXED: GetAllAgents now returns agents with updated balances
 func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContextInterface) ([]*Agent, error) {
-	it, err := ctx.GetStub().GetStateByRange("", "")
+	// Optimization: Use scoped range query instead of full scan
+	// AgentKeyPrefix ends with ":", so the next character is ";"
+	// This covers all keys starting with AgentKeyPrefix
+	endKey := AgentKeyPrefix[:len(AgentKeyPrefix)-1] + string(AgentKeyPrefix[len(AgentKeyPrefix)-1]+1)
+
+	it, err := ctx.GetStub().GetStateByRange(AgentKeyPrefix, endKey)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao iterar sobre o ledger: %v", err)
 	}
@@ -244,10 +249,6 @@ func (s *CombinedEnergyContract) GetAllAgents(ctx contractapi.TransactionContext
 		kv, err := it.Next()
 		if err != nil {
 			return nil, fmt.Errorf("erro ao ler próximo item: %v", err)
-		}
-
-		if !strings.HasPrefix(kv.Key, AgentKeyPrefix) {
-			continue
 		}
 
 		var a Agent
