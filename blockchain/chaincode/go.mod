@@ -1,4 +1,4 @@
-module main
+module energy-chaincode
 
 go 1.21.5
 
